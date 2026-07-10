@@ -32,6 +32,34 @@ function GroundStation() {
     return () => clearInterval(id);
   }, []);
 
+  // Mission event log — tracks rocket state transitions with timestamps
+  const [events, setEvents] = useState<MissionEvent[]>([]);
+  const prevRocketState = useRef(rocket.state);
+  const prevCansatState = useRef(cansat.state);
+  useEffect(() => {
+    const stamp = () => new Date().toISOString().slice(11, 19);
+    const add = (label: string) =>
+      setEvents((e) => [...e, { label, time: stamp() }].slice(-20));
+
+    if (prevRocketState.current !== rocket.state) {
+      if (rocket.state === "ASCENT") {
+        add("IGNITION");
+        add("LIFT-OFF");
+      } else if (rocket.state === "PAYLOAD_SEPARATION") add("PAYLOAD RELEASE");
+      else if (rocket.state === "DESCENT") add("APOGEE / DESCENT");
+      else if (rocket.state === "AEROBRAKE_RELEASE") add("AEROBRAKE RELEASE");
+      else if (rocket.state === "IMPACT") add("TOUCHDOWN");
+      prevRocketState.current = rocket.state;
+    }
+    if (prevCansatState.current !== cansat.state) {
+      if (cansat.state === "DEPLOYED") add("CANSAT DEPLOYED");
+      else if (cansat.state === "POWERED_DESCENT") add("POWERED DESCENT");
+      else if (cansat.state === "LANDED") add("CANSAT LANDED");
+      prevCansatState.current = cansat.state;
+    }
+  }, [rocket.state, cansat.state]);
+
+
   const pushCommand = (channel: ConsoleEntry["channel"], cmd: string) => {
     const id = nextId.current++;
     const t = new Date().toISOString().slice(11, 19);
