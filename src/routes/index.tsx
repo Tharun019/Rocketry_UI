@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Header } from "@/components/gcs/Header";
+import { Header, type MissionEvent } from "@/components/gcs/Header";
 import { RocketDashboard } from "@/components/gcs/RocketDashboard";
 import { CansatDashboard } from "@/components/gcs/CansatDashboard";
 import { AttitudeIndicator } from "@/components/gcs/AttitudeIndicator";
@@ -31,6 +31,34 @@ function GroundStation() {
     }, 500);
     return () => clearInterval(id);
   }, []);
+
+  // Mission event log — tracks rocket state transitions with timestamps
+  const [events, setEvents] = useState<MissionEvent[]>([]);
+  const prevRocketState = useRef(rocket.state);
+  const prevCansatState = useRef(cansat.state);
+  useEffect(() => {
+    const stamp = () => new Date().toISOString().slice(11, 19);
+    const add = (label: string) =>
+      setEvents((e) => [...e, { label, time: stamp() }].slice(-20));
+
+    if (prevRocketState.current !== rocket.state) {
+      if (rocket.state === "ASCENT") {
+        add("IGNITION");
+        add("LIFT-OFF");
+      } else if (rocket.state === "PAYLOAD_SEPARATION") add("PAYLOAD RELEASE");
+      else if (rocket.state === "DESCENT") add("APOGEE / DESCENT");
+      else if (rocket.state === "AEROBRAKE_RELEASE") add("AEROBRAKE RELEASE");
+      else if (rocket.state === "IMPACT") add("TOUCHDOWN");
+      prevRocketState.current = rocket.state;
+    }
+    if (prevCansatState.current !== cansat.state) {
+      if (cansat.state === "DEPLOYED") add("CANSAT DEPLOYED");
+      else if (cansat.state === "POWERED_DESCENT") add("POWERED DESCENT");
+      else if (cansat.state === "LANDED") add("CANSAT LANDED");
+      prevCansatState.current = cansat.state;
+    }
+  }, [rocket.state, cansat.state]);
+
 
   const pushCommand = (channel: ConsoleEntry["channel"], cmd: string) => {
     const id = nextId.current++;
@@ -66,6 +94,7 @@ function GroundStation() {
         missionId="CS-2026-042"
         launchSite="Sriharikota · Pad-B"
         alert={alert}
+        events={events}
       />
 
       <main className="flex-1 p-4 flex flex-col gap-4">
