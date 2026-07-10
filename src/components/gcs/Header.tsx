@@ -3,22 +3,25 @@ import { Radio, Satellite, AlertTriangle } from "lucide-react";
 
 type RfStatus = { rssi: number; quality: number };
 
+export type MissionEvent = { label: string; time: string };
+
 type Props = {
   rocketRf: RfStatus;
   cansatRf: RfStatus;
   missionId: string;
   launchSite: string;
   alert?: { level: "info" | "warn" | "danger"; message: string } | null;
+  events: MissionEvent[];
 };
 
-export function Header({ rocketRf, cansatRf, missionId, launchSite, alert }: Props) {
-  const [now, setNow] = useState(new Date());
+export function Header({ rocketRf, cansatRf, missionId, launchSite, alert, events }: Props) {
+  const [t, setT] = useState("--:--:--");
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 250);
+    const tick = () => setT(new Date().toISOString().slice(11, 19));
+    tick();
+    const id = setInterval(tick, 250);
     return () => clearInterval(id);
   }, []);
-
-  const t = now.toISOString().slice(11, 19);
 
   return (
     <header className="border-b border-border bg-[oklch(0.155_0_0)]/80 backdrop-blur">
@@ -40,11 +43,34 @@ export function Header({ rocketRf, cansatRf, missionId, launchSite, alert }: Pro
           <span className="readout text-lg">{t}</span>
         </div>
 
-        <div className="hidden lg:flex flex-col leading-tight">
+        <div className="hidden md:block h-8 w-px bg-border" />
+
+        <div className="hidden md:flex flex-col leading-tight min-w-[220px]">
+          <span className="label-mono">Event Log</span>
+          {events.length === 0 ? (
+            <span className="readout text-[11px] text-muted-foreground">Awaiting ignition…</span>
+          ) : (
+            <div className="flex flex-col gap-0.5 max-h-[38px] overflow-hidden">
+              {events.slice(-2).map((e, i) => (
+                <div key={i} className="flex items-center gap-2 leading-tight">
+                  <span
+                    className="readout text-[11px]"
+                    style={{ color: "var(--rocket)" }}
+                  >
+                    {e.time}
+                  </span>
+                  <span className="label-mono text-[10px]">{e.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="hidden xl:flex flex-col leading-tight">
           <span className="label-mono">Mission ID</span>
           <span className="readout text-sm">{missionId}</span>
         </div>
-        <div className="hidden lg:flex flex-col leading-tight">
+        <div className="hidden xl:flex flex-col leading-tight">
           <span className="label-mono">Launch Site</span>
           <span className="readout text-sm">{launchSite}</span>
         </div>
@@ -54,6 +80,7 @@ export function Header({ rocketRf, cansatRf, missionId, launchSite, alert }: Pro
           <RfChip label="CANSAT" accent="var(--cansat)" rf={cansatRf} icon={<Satellite className="h-3 w-3" />} />
         </div>
       </div>
+
 
       {alert ? (
         <div
