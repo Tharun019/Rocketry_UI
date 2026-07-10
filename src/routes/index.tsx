@@ -94,6 +94,7 @@ function GroundStation() {
         missionId="CS-2026-042"
         launchSite="Sriharikota · Pad-B"
         alert={alert}
+        events={events}
       />
 
       <main className="flex-1 p-4 flex flex-col gap-4">
