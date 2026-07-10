@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Header } from "@/components/gcs/Header";
+import { Header, type MissionEvent } from "@/components/gcs/Header";
 import { RocketDashboard } from "@/components/gcs/RocketDashboard";
 import { CansatDashboard } from "@/components/gcs/CansatDashboard";
 import { AttitudeIndicator } from "@/components/gcs/AttitudeIndicator";
