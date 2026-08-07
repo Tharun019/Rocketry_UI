@@ -66,7 +66,7 @@ export function TrajectoryPanel({
 
   // predicted zone radius in viewbox units (approx: 1 deg lat ~ 111_000 m)
   const zoneR = predicted
-    ? Math.max(3, ((predicted.radiusM / 111000) / (maxLat - minLat)) * H)
+    ? Math.min(14, Math.max(3, ((predicted.radiusM / 111000) / (maxLat - minLat)) * H))
     : 0;
 
   const arrow = vector

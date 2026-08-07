@@ -114,9 +114,9 @@ export function ChartGroup({ title, series, accent, columns = "grid-cols-2 md:gr
         })}
       </div>
 
-      <div ref={containerRef} className={`grid ${columns} gap-2 h-[110px]`} style={{ touchAction: "none" }}>
+      <div ref={containerRef} className={`grid ${columns} gap-2 auto-rows-[110px]`} style={{ touchAction: "none" }}>
         {visible.length === 0 ? (
-          <div className="col-span-full flex items-center justify-center label-mono text-[10px] opacity-50">
+          <div className="col-span-full h-[110px] flex items-center justify-center label-mono text-[10px] opacity-50">
             No series selected
           </div>
         ) : (
