@@ -1,16 +1,16 @@
 import { Satellite } from "lucide-react";
 import { StateTimeline } from "./StateTimeline";
 import { TelemetryCard } from "./TelemetryCard";
-import { MiniChart } from "./MiniChart";
-import { MapPanel } from "./MapPanel";
-import { CommandGrid } from "./CommandButton";
+import { ChartGroup } from "./ChartGroup";
+import { ControlledDescentPanel } from "./ControlledDescentPanel";
+import { CommandGrid, type CommandSender } from "./CommandButton";
 import { CANSAT_STATES, type CansatFrame } from "./telemetry";
 
 const ACCENT = "var(--cansat)";
 
 type Props = {
   data: CansatFrame;
-  onCommand: (cmd: string) => void;
+  onCommand: CommandSender;
 };
 
 export function CansatDashboard({ data, onCommand }: Props) {
@@ -20,10 +20,7 @@ export function CansatDashboard({ data, onCommand }: Props) {
         <div className="flex items-center gap-2">
           <Satellite className="h-4 w-4" style={{ color: ACCENT }} />
           <h2 className="font-semibold tracking-tight text-lg">CanSat</h2>
-          <span
-            className="h-1.5 w-1.5 rounded-full dot-pulse ml-1"
-            style={{ background: ACCENT }}
-          />
+          <span className="h-1.5 w-1.5 rounded-full dot-pulse ml-1" style={{ background: ACCENT }} />
         </div>
         <span className="label-mono text-[10px]">Secondary Payload</span>
       </div>
@@ -36,11 +33,7 @@ export function CansatDashboard({ data, onCommand }: Props) {
         <TelemetryCard label="Pressure" value={data.pressure.toFixed(0)} unit="hPa" />
         <TelemetryCard label="Radiation" value={data.radiationCpm.toFixed(0)} unit="CPM" />
         <TelemetryCard label="IR Temp" value={data.irTemp.toFixed(1)} unit="°C" />
-        <TelemetryCard
-          label="GPS"
-          value={`${data.lat.toFixed(4)}°`}
-          sub={`${data.lon.toFixed(4)}°`}
-        />
+        <TelemetryCard label="GPS" value={`${data.lat.toFixed(4)}°`} sub={`${data.lon.toFixed(4)}°`} />
         <TelemetryCard
           label="Battery"
           value={data.battery.toFixed(2)}
@@ -48,40 +41,51 @@ export function CansatDashboard({ data, onCommand }: Props) {
           accent="var(--ok)"
           sub={`${data.current.toFixed(2)} A`}
         />
-        <TelemetryCard label="Link" value={`${data.linkQuality.toFixed(0)}%`} accent="var(--ok)" sub={`${data.rssi} dBm`} />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 h-[100px]">
-        <MiniChart data={data.charts.altitude} color="oklch(0.82 0.12 210)" label="Altitude" unit="m" />
-        <MiniChart data={data.charts.radiation} color="oklch(0.78 0.16 85)" label="Radiation" unit="CPM" />
-        <MiniChart
-          data={data.charts.batteryCurrent}
-          color="oklch(0.78 0.15 155)"
-          label="Batt Current"
-          unit="A"
+        <TelemetryCard
+          label="Link"
+          value={`${data.linkQuality.toFixed(0)}%`}
+          accent="var(--ok)"
+          sub={`${data.rssi} dBm · SNR ${data.snr.toFixed(1)}`}
         />
-        <MiniChart data={data.charts.irTemp} color="oklch(0.78 0.11 210)" label="IR Temp" unit="°C" />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 min-h-[220px]">
-        <MapPanel path={data.path} accent={ACCENT} label="Descent Path" />
-        <div className="panel p-3 flex flex-col gap-2">
-          <span className="label-mono">Commands</span>
-          <CommandGrid
-            commands={[
-              "TELEMETRY_ENABLE",
-              "IMU_CALIBRATE",
-              "DEPLOY_CHUTE",
-              "SERVO_TRIGGER",
-              "COMM_TEST",
-              "SIMULATION_ENABLE",
-              "SIMULATION_ACTIVATE",
-              "DISABLE_ACTIVE_SYSTEMS",
-            ]}
-            accent={ACCENT}
-            onSend={onCommand}
-          />
-        </div>
+      <ControlledDescentPanel data={data} accent={ACCENT} />
+
+      <ChartGroup
+        title="CanSat Live Charts"
+        accent={ACCENT}
+        series={[
+          { key: "alt", label: "Altitude", unit: "m", color: "oklch(0.82 0.12 210)", data: data.charts.altitude },
+          { key: "vel", label: "Velocity", unit: "m/s", color: "oklch(0.82 0.12 210)", data: data.charts.velocity },
+          { key: "pres", label: "Pressure", unit: "hPa", color: "oklch(0.74 0.1 210)", data: data.charts.pressure },
+          { key: "rad", label: "Radiation", unit: "CPM", color: "oklch(0.78 0.16 85)", data: data.charts.radiation },
+          { key: "bcur", label: "Batt Current", unit: "A", color: "oklch(0.78 0.15 155)", data: data.charts.batteryCurrent },
+          { key: "bvolt", label: "Batt Voltage", unit: "V", color: "oklch(0.78 0.15 155)", data: data.charts.batteryVoltage },
+          { key: "ir", label: "IR Temp", unit: "°C", color: "oklch(0.78 0.11 210)", data: data.charts.irTemp },
+        ]}
+      />
+
+      <div className="panel p-3 flex flex-col gap-2">
+        <span className="label-mono">Commands</span>
+        <CommandGrid
+          commands={[
+            { name: "TELEMETRY_ENABLE" },
+            { name: "IMU_CALIBRATE" },
+            { name: "DEPLOY_CHUTE" },
+            { name: "SERVO_TRIGGER" },
+            { name: "COMM_TEST" },
+            { name: "SIMULATION_ENABLE" },
+            { name: "SIMULATION_ACTIVATE" },
+            {
+              name: "STOP_TELEMETRY",
+              danger: true,
+              confirm: true,
+              note: "Halts downlink in case of interference",
+            },
+          ]}
+          accent={ACCENT}
+          onSend={onCommand}
+        />
       </div>
     </section>
   );

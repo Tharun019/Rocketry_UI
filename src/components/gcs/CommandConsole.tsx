@@ -6,6 +6,7 @@ export type ConsoleEntry = {
   channel: "ROCKET" | "CANSAT" | "SYS";
   cmd: string;
   ack: "ACK" | "NAK" | "PENDING";
+  exec?: "PASS" | "FAIL" | "PENDING";
 };
 
 type Props = {
@@ -55,7 +56,7 @@ export function CommandConsole({ entries }: Props) {
               </span>
               <span className="flex-1 truncate">{e.cmd}</span>
               <span
-                className="text-[10px]"
+                className="text-[10px] w-[52px] text-right"
                 style={{
                   color:
                     e.ack === "ACK"
@@ -66,6 +67,19 @@ export function CommandConsole({ entries }: Props) {
                 }}
               >
                 {e.ack}
+              </span>
+              <span
+                className="text-[10px] w-[56px] text-right"
+                style={{
+                  color:
+                    e.exec === "PASS"
+                      ? "var(--ok)"
+                      : e.exec === "FAIL"
+                        ? "var(--destructive)"
+                        : "var(--muted-foreground)",
+                }}
+              >
+                {e.exec ?? "—"}
               </span>
             </div>
           ))
