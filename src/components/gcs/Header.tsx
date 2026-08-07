@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Radio, Satellite, AlertTriangle } from "lucide-react";
 
-type RfStatus = { rssi: number; quality: number };
+type RfStatus = { rssi: number; snr: number; quality: number };
 
 export type MissionEvent = { label: string; time: string };
+
+export type SystemStatus = "NOMINAL" | "DEGRADED" | "CRITICAL";
 
 type Props = {
   rocketRf: RfStatus;
@@ -12,9 +14,26 @@ type Props = {
   launchSite: string;
   alert?: { level: "info" | "warn" | "danger"; message: string } | null;
   events: MissionEvent[];
+  missionPhase: string;
+  systemStatus: SystemStatus;
 };
 
-export function Header({ rocketRf, cansatRf, missionId, launchSite, alert, events }: Props) {
+const STATUS_COLOR: Record<SystemStatus, string> = {
+  NOMINAL: "var(--ok)",
+  DEGRADED: "var(--warn)",
+  CRITICAL: "var(--destructive)",
+};
+
+export function Header({
+  rocketRf,
+  cansatRf,
+  missionId,
+  launchSite,
+  alert,
+  events,
+  missionPhase,
+  systemStatus,
+}: Props) {
   const [t, setT] = useState("--:--:--");
   useEffect(() => {
     const tick = () => setT(new Date().toISOString().slice(11, 19));
@@ -25,7 +44,7 @@ export function Header({ rocketRf, cansatRf, missionId, launchSite, alert, event
 
   return (
     <header className="border-b border-border bg-[oklch(0.155_0_0)]/80 backdrop-blur">
-      <div className="px-5 py-3 flex items-center gap-6">
+      <div className="px-5 py-3 flex items-center gap-6 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 rounded-md border border-rocket/50 flex items-center justify-center bg-[oklch(0.18_0.02_55)]">
             <Radio className="h-4 w-4" style={{ color: "var(--rocket)" }} />
@@ -45,6 +64,25 @@ export function Header({ rocketRf, cansatRf, missionId, launchSite, alert, event
 
         <div className="hidden md:block h-8 w-px bg-border" />
 
+        <div className="flex flex-col leading-tight">
+          <span className="label-mono">Mission Phase</span>
+          <span className="readout text-sm" style={{ color: "var(--rocket)" }}>
+            {missionPhase}
+          </span>
+        </div>
+
+        <div className="flex flex-col leading-tight">
+          <span className="label-mono">System Status</span>
+          <span
+            className="label-mono text-[10px] px-2 py-0.5 rounded border mt-0.5 w-fit"
+            style={{ color: STATUS_COLOR[systemStatus], borderColor: STATUS_COLOR[systemStatus] }}
+          >
+            {systemStatus}
+          </span>
+        </div>
+
+        <div className="hidden md:block h-8 w-px bg-border" />
+
         <div className="hidden md:flex flex-col leading-tight min-w-[220px]">
           <span className="label-mono">Event Log</span>
           {events.length === 0 ? (
@@ -53,10 +91,7 @@ export function Header({ rocketRf, cansatRf, missionId, launchSite, alert, event
             <div className="flex flex-col gap-0.5 max-h-[38px] overflow-hidden">
               {events.slice(-2).map((e, i) => (
                 <div key={i} className="flex items-center gap-2 leading-tight">
-                  <span
-                    className="readout text-[11px]"
-                    style={{ color: "var(--rocket)" }}
-                  >
+                  <span className="readout text-[11px]" style={{ color: "var(--rocket)" }}>
                     {e.time}
                   </span>
                   <span className="label-mono text-[10px]">{e.label}</span>
@@ -80,7 +115,6 @@ export function Header({ rocketRf, cansatRf, missionId, launchSite, alert, event
           <RfChip label="CANSAT" accent="var(--cansat)" rf={cansatRf} icon={<Satellite className="h-3 w-3" />} />
         </div>
       </div>
-
 
       {alert ? (
         <div
@@ -140,7 +174,7 @@ function RfChip({
         style={{ background: good ? "var(--ok)" : "var(--warn)" }}
       />
       <span className="readout text-[11px] text-muted-foreground">
-        {rf.rssi} dBm · {rf.quality.toFixed(0)}%
+        {rf.rssi} dBm · SNR {rf.snr.toFixed(1)} dB · {rf.quality.toFixed(0)}%
       </span>
     </div>
   );
