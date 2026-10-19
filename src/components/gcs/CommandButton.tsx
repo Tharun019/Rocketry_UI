@@ -84,10 +84,12 @@ export function CommandGrid({
   commands,
   accent,
   onSend,
+  columns = "grid-cols-2",
 }: {
   commands: (string | CommandSpec)[];
   accent: string;
   onSend: CommandSender;
+  columns?: string;
 }) {
   const specs: CommandSpec[] = commands.map((c) => (typeof c === "string" ? { name: c } : c));
   const [stages, setStages] = useState<Record<string, CmdStage>>({});
@@ -109,7 +111,7 @@ export function CommandGrid({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-1.5">
+      <div className={`grid ${columns} gap-1.5`}>
         {specs.map((spec) => (
           <CommandButton
             key={spec.name}

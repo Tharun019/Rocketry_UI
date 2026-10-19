@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Radio, Satellite, AlertTriangle } from "lucide-react";
+import { Radio, AlertTriangle } from "lucide-react";
 
 type RfStatus = { rssi: number; snr: number; quality: number };
 
@@ -9,9 +9,6 @@ export type SystemStatus = "NOMINAL" | "DEGRADED" | "CRITICAL";
 
 type Props = {
   rocketRf: RfStatus;
-  cansatRf: RfStatus;
-  missionId: string;
-  launchSite: string;
   alert?: { level: "info" | "warn" | "danger"; message: string } | null;
   events: MissionEvent[];
   missionPhase: string;
@@ -26,9 +23,6 @@ const STATUS_COLOR: Record<SystemStatus, string> = {
 
 export function Header({
   rocketRf,
-  cansatRf,
-  missionId,
-  launchSite,
   alert,
   events,
   missionPhase,
@@ -50,8 +44,8 @@ export function Header({
             <Radio className="h-4 w-4" style={{ color: "var(--rocket)" }} />
           </div>
           <div className="leading-tight">
-            <div className="font-semibold tracking-tight">Ground Station</div>
-            <div className="label-mono text-[10px]">Rocket + CanSat Telemetry</div>
+            <div className="font-semibold tracking-tight">Rocket Ground Station</div>
+            <div className="label-mono text-[10px]">Rocket Telemetry</div>
           </div>
         </div>
 
@@ -101,18 +95,8 @@ export function Header({
           )}
         </div>
 
-        <div className="hidden xl:flex flex-col leading-tight">
-          <span className="label-mono">Mission ID</span>
-          <span className="readout text-sm">{missionId}</span>
-        </div>
-        <div className="hidden xl:flex flex-col leading-tight">
-          <span className="label-mono">Launch Site</span>
-          <span className="readout text-sm">{launchSite}</span>
-        </div>
-
         <div className="ml-auto flex items-center gap-2">
           <RfChip label="ROCKET" accent="var(--rocket)" rf={rocketRf} icon={<Radio className="h-3 w-3" />} />
-          <RfChip label="CANSAT" accent="var(--cansat)" rf={cansatRf} icon={<Satellite className="h-3 w-3" />} />
         </div>
       </div>
 
@@ -125,7 +109,7 @@ export function Header({
                 ? "oklch(0.28 0.1 25 / 0.4)"
                 : alert.level === "warn"
                   ? "oklch(0.3 0.09 85 / 0.35)"
-                  : "oklch(0.24 0.03 210 / 0.35)",
+                  : "oklch(0.24 0.03 55 / 0.35)",
           }}
         >
           <AlertTriangle
@@ -136,7 +120,7 @@ export function Header({
                   ? "var(--destructive)"
                   : alert.level === "warn"
                     ? "var(--warn)"
-                    : "var(--cansat)",
+                    : "var(--rocket)",
             }}
           />
           <span className="label-mono text-[10px]" style={{ letterSpacing: "0.18em" }}>

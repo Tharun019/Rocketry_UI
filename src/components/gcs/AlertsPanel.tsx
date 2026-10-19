@@ -11,7 +11,7 @@ export type AlertType =
 export type ActiveAlert = {
   type: AlertType;
   level: "warn" | "danger";
-  source: "ROCKET" | "CANSAT" | "SYS";
+  source: "ROCKET" | "SYS";
   since: string;
   detail?: string;
 };

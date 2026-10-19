@@ -29,12 +29,12 @@ export function PacketMonitor({ tx, rx, loss, snr, lastPacket, rateHz, status }:
       </div>
       <div className="grid grid-cols-3 gap-2">
         <Stat label="TX" value={tx} color="var(--rocket)" />
-        <Stat label="RX" value={rx} color="var(--cansat)" />
+        <Stat label="RX" value={rx} color="var(--rocket)" />
         <Stat label="LOSS" value={`${lossPct.toFixed(2)}%`} color="var(--warn)" />
       </div>
       <div className="grid grid-cols-3 gap-2">
         <Stat label="SNR" value={`${snr.toFixed(1)} dB`} color="var(--ok)" small />
-        <Stat label="RATE" value={`${rateHz.toFixed(1)} Hz`} color="var(--cansat)" small />
+        <Stat label="RATE" value={`${rateHz.toFixed(1)} Hz`} color="var(--rocket)" small />
         <Stat label="LAST PKT" value={lastPacket} color="var(--muted-foreground)" small />
       </div>
       <div className="mt-1">

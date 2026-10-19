@@ -1,175 +1,279 @@
-import { MiniChart } from "./MiniChart";
-import type { LatLon, Sample } from "./telemetry";
-
-export type TrajectoryMarker = {
-  label: string;
-  pos: LatLon;
-  color: string;
-};
+import { useMemo, useState } from "react";
+import { DualProfileChart } from "./DualProfileChart";
+import { Trajectory3D, altitudeRgb, type CameraMode, type Marker3D } from "./Trajectory3D";
+import { DEFAULT_SITE, distanceBearing, type LaunchSite } from "./site";
+import type { Sample, TrackPoint } from "./telemetry";
 
 type Props = {
-  path: LatLon[];
-  accent: string;
   label: string;
-  markers?: TrajectoryMarker[];
-  /** predicted landing zone: center + radius in metres */
-  predicted?: { pos: LatLon; radiusM: number };
-  /** heading vector arrow drawn on the live position, in degrees + magnitude (m/s) */
-  vector?: { headingDeg: number; speed: number };
-  profile: Sample[];
-  profileColor: string;
+  accent: string;
+  track: TrackPoint[];
+  markers: Marker3D[];
+  site: LaunchSite;
+  onSiteChange: (s: LaunchSite) => void;
+  onSiteReset: () => void;
+  velocityNow: number;
+  altitude: Sample[];
+  velocity: Sample[];
+  altitudeColor: string;
+  velocityColor: string;
 };
 
+const MODES: { id: CameraMode; label: string }[] = [
+  { id: "AUTO", label: "Auto" },
+  { id: "FOLLOW", label: "Follow" },
+  { id: "TOP", label: "Top" },
+  { id: "ORBIT", label: "Orbit" },
+];
+
 export function TrajectoryPanel({
-  path,
-  accent,
   label,
-  markers = [],
-  predicted,
-  vector,
-  profile,
-  profileColor,
+  accent,
+  track,
+  markers,
+  site,
+  onSiteChange,
+  onSiteReset,
+  velocityNow,
+  altitude,
+  velocity,
+  altitudeColor,
+  velocityColor,
 }: Props) {
-  if (path.length === 0) return null;
+  const [mode, setMode] = useState<CameraMode>("AUTO");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ lat: "", lon: "" });
 
-  const pts: LatLon[] = [...path, ...markers.map((m) => m.pos)];
-  if (predicted) pts.push(predicted.pos);
-  const lats = pts.map((p) => p[0]);
-  const lons = pts.map((p) => p[1]);
-  let minLat = Math.min(...lats);
-  let maxLat = Math.max(...lats);
-  let minLon = Math.min(...lons);
-  let maxLon = Math.max(...lons);
-  const padLat = Math.max(0.0006, (maxLat - minLat) * 0.25);
-  const padLon = Math.max(0.0006, (maxLon - minLon) * 0.25);
-  minLat -= padLat;
-  maxLat += padLat;
-  minLon -= padLon;
-  maxLon += padLon;
+  const last = track.at(-1) ?? { t: 0, lat: site.lat, lon: site.lon, alt: 0 };
+  const { dist, bearing } = distanceBearing(site, last);
+  const maxAlt = useMemo(() => track.reduce((m, p) => Math.max(m, p.alt), 0), [track]);
+  const heading = useMemo(() => {
+    if (track.length < 2) return 0;
+    return distanceBearing(track.at(-2)!, track.at(-1)!).bearing;
+  }, [track]);
 
-  const W = 100;
-  const H = 100;
-  const proj = (lat: number, lon: number): [number, number] => [
-    ((lon - minLon) / (maxLon - minLon)) * W,
-    H - ((lat - minLat) / (maxLat - minLat)) * H,
-  ];
+  const openEditor = () => {
+    setDraft({ lat: site.lat.toFixed(6), lon: site.lon.toFixed(6) });
+    setEditing(true);
+  };
+  const apply = () => {
+    const lat = Number(draft.lat);
+    const lon = Number(draft.lon);
+    if (
+      Number.isFinite(lat) &&
+      Number.isFinite(lon) &&
+      Math.abs(lat) <= 90 &&
+      Math.abs(lon) <= 180
+    ) {
+      onSiteChange({ lat, lon });
+      setEditing(false);
+    }
+  };
+  const isDefault = site.lat === DEFAULT_SITE.lat && site.lon === DEFAULT_SITE.lon;
 
-  const d = path
-    .map((p, i) => {
-      const [x, y] = proj(p[0], p[1]);
-      return `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(" ");
-
-  const [lx, ly] = proj(path.at(-1)![0], path.at(-1)![1]);
-  const uid = label.replace(/\s+/g, "-");
-
-  // predicted zone radius in viewbox units (approx: 1 deg lat ~ 111_000 m)
-  const zoneR = predicted
-    ? Math.min(14, Math.max(3, ((predicted.radiusM / 111000) / (maxLat - minLat)) * H))
-    : 0;
-
-  const arrow = vector
-    ? (() => {
-        const rad = ((vector.headingDeg - 90) * Math.PI) / 180;
-        const len = Math.min(18, 4 + Math.abs(vector.speed) * 0.12);
-        return { x2: lx + Math.cos(rad) * len, y2: ly + Math.sin(rad) * len };
-      })()
-    : null;
+  const legend = [0, 0.25, 0.5, 0.75, 1].map((f) => `rgb(${altitudeRgb(f).join(",")}) ${f * 100}%`);
 
   return (
     <div className="panel p-3 flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="label-mono">{label}</span>
-        <span className="readout text-[10px] text-muted-foreground">
-          {path.at(-1)![0].toFixed(5)}°, {path.at(-1)![1].toFixed(5)}°
-        </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="label-mono text-[10px]">Site</span>
+          <span className="readout text-[11px]">
+            {site.lat.toFixed(6)}°N, {site.lon.toFixed(6)}°E
+          </span>
+          {!isDefault ? (
+            <span
+              className="label-mono text-[9px] px-1.5 py-0.5 rounded border"
+              style={{ color: "var(--warn)", borderColor: "var(--warn)" }}
+            >
+              Adjusted
+            </span>
+          ) : null}
+          <button
+            onClick={editing ? () => setEditing(false) : openEditor}
+            className="panel px-2 py-1 label-mono text-[10px] hover:bg-[oklch(0.21_0_0)]"
+          >
+            {editing ? "Cancel" : "Adjust"}
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3">
-        <div className="relative h-[300px] rounded-md overflow-hidden border border-border bg-[oklch(0.16_0_0)]">
-          <svg viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
-            <defs>
-              <pattern id={`grid-${uid}`} width="10" height="10" patternUnits="userSpaceOnUse">
-                <path d="M10 0 L0 0 0 10" fill="none" stroke="oklch(0.22 0 0)" strokeWidth="0.2" />
-              </pattern>
-            </defs>
-            <rect width={W} height={H} fill={`url(#grid-${uid})`} />
+      {editing ? (
+        <div className="panel p-2 flex items-end gap-2 flex-wrap">
+          <label className="flex flex-col gap-1">
+            <span className="label-mono text-[9px]">Latitude °N</span>
+            <input
+              value={draft.lat}
+              onChange={(e) => setDraft((d) => ({ ...d, lat: e.target.value }))}
+              inputMode="decimal"
+              className="panel px-2 py-1 readout text-sm w-36 bg-[oklch(0.16_0_0)]"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="label-mono text-[9px]">Longitude °E</span>
+            <input
+              value={draft.lon}
+              onChange={(e) => setDraft((d) => ({ ...d, lon: e.target.value }))}
+              inputMode="decimal"
+              className="panel px-2 py-1 readout text-sm w-36 bg-[oklch(0.16_0_0)]"
+            />
+          </label>
+          <button
+            onClick={apply}
+            className="panel px-3 py-1.5 label-mono text-[10px]"
+            style={{ borderColor: accent, color: accent }}
+          >
+            Apply
+          </button>
+          <button
+            onClick={() => {
+              onSiteReset();
+              setEditing(false);
+            }}
+            className="panel px-3 py-1.5 label-mono text-[10px] hover:bg-[oklch(0.21_0_0)]"
+          >
+            Reset to competition default
+          </button>
+          <span className="label-mono text-[9px] opacity-70">
+            Saved in this browser · restarts the simulation
+          </span>
+        </div>
+      ) : null}
 
-            {predicted ? (
-              <g>
-                <circle
-                  cx={proj(predicted.pos[0], predicted.pos[1])[0]}
-                  cy={proj(predicted.pos[0], predicted.pos[1])[1]}
-                  r={zoneR}
-                  fill="oklch(0.78 0.16 85 / 0.14)"
-                  stroke="oklch(0.78 0.16 85 / 0.6)"
-                  strokeWidth="0.3"
-                  strokeDasharray="1.5 1.2"
-                />
-              </g>
-            ) : null}
+      <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-3">
+        <div className="relative h-[440px] rounded-md overflow-hidden border border-border bg-[oklch(0.14_0_0)]">
+          <Trajectory3D
+            track={track}
+            markers={markers}
+            site={site}
+            mode={mode}
+            onModeChange={setMode}
+          />
 
-            <path d={d} fill="none" stroke={accent} strokeWidth="0.7" strokeLinecap="round" strokeLinejoin="round" />
-
-            {markers.map((m) => {
-              const [mx, my] = proj(m.pos[0], m.pos[1]);
-              return <circle key={m.label} cx={mx} cy={my} r="1.3" fill={m.color} />;
-            })}
-
-            {arrow ? (
-              <line
-                x1={lx}
-                y1={ly}
-                x2={arrow.x2}
-                y2={arrow.y2}
-                stroke="oklch(0.9 0 0)"
-                strokeWidth="0.5"
-                markerEnd={`url(#head-${uid})`}
-              />
-            ) : null}
-            <defs>
-              <marker id={`head-${uid}`} markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
-                <path d="M0,0 L4,2 L0,4 z" fill="oklch(0.9 0 0)" />
-              </marker>
-            </defs>
-
-            <circle cx={lx} cy={ly} r="1.6" fill={accent}>
-              <animate attributeName="r" values="1.6;2.6;1.6" dur="1.6s" repeatCount="indefinite" />
-            </circle>
-          </svg>
-
-          <div className="absolute top-1.5 right-2 label-mono text-[9px]" style={{ color: accent }}>
-            Live
-          </div>
-          {vector ? (
-            <div className="absolute bottom-1.5 right-2 readout text-[10px] text-muted-foreground">
-              V {vector.speed.toFixed(1)} m/s · HDG {vector.headingDeg.toFixed(0)}°
-            </div>
-          ) : null}
-          <div className="absolute bottom-1.5 left-2 flex flex-wrap gap-x-3 gap-y-0.5 pr-24">
-            {markers.map((m) => (
-              <span key={m.label} className="flex items-center gap-1 label-mono text-[8.5px] opacity-80">
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: m.color }} />
+          {/* Camera controls */}
+          <div className="absolute top-2 left-2 flex gap-1 z-10">
+            {MODES.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setMode(m.id)}
+                className="px-2 py-1 rounded label-mono text-[9.5px] border backdrop-blur bg-[oklch(0.12_0_0/0.7)]"
+                style={{
+                  borderColor: mode === m.id ? accent : "oklch(0.35 0 0)",
+                  color: mode === m.id ? accent : undefined,
+                }}
+              >
                 {m.label}
-              </span>
+              </button>
             ))}
-            {predicted ? (
-              <span className="flex items-center gap-1 label-mono text-[8.5px] opacity-80">
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: "oklch(0.78 0.16 85 / 0.6)" }}
-                />
-                Predicted Zone
-              </span>
+            {mode === "FREE" ? (
+              <span className="px-2 py-1 label-mono text-[9.5px] opacity-70">Manual</span>
             ) : null}
+          </div>
+
+          <div className="absolute top-2 right-2 flex gap-1 z-10">
+            <button
+              onClick={() => downloadKml(track, markers, site)}
+              disabled={track.length < 2}
+              className="px-2 py-1 rounded label-mono text-[9.5px] border border-[oklch(0.35_0_0)] backdrop-blur bg-[oklch(0.12_0_0/0.7)] disabled:opacity-40"
+            >
+              Export KML
+            </button>
+            <span
+              className="px-2 py-1 label-mono text-[9.5px] flex items-center gap-1.5"
+              style={{ color: accent }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full dot-pulse" style={{ background: accent }} />
+              Live
+            </span>
+          </div>
+
+          {/* Readouts */}
+          <div className="absolute bottom-7 left-2 z-10 grid grid-cols-4 gap-px rounded overflow-hidden border border-[oklch(0.3_0_0)] bg-[oklch(0.3_0_0)] pointer-events-none">
+            {[
+              ["ALT AGL", `${last.alt.toFixed(0)} m`],
+              ["MAX ALT", `${maxAlt.toFixed(0)} m`],
+              ["FROM SITE", `${dist.toFixed(0)} m @ ${bearing.toFixed(0)}°`],
+              ["V · HDG", `${velocityNow.toFixed(1)} m/s · ${heading.toFixed(0)}°`],
+            ].map(([k, v]) => (
+              <div key={k} className="px-2 py-1 bg-[oklch(0.12_0_0/0.82)]">
+                <div className="label-mono text-[8.5px] opacity-70">{k}</div>
+                <div className="readout text-[11px]">{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Altitude colour legend */}
+          <div className="absolute bottom-7 right-2 z-10 flex flex-col items-end gap-1 pointer-events-none">
+            <span className="label-mono text-[8.5px] opacity-70">Altitude</span>
+            <div
+              className="h-1.5 w-28 rounded"
+              style={{ background: `linear-gradient(90deg, ${legend.join(",")})` }}
+            />
+            <div className="w-28 flex justify-between readout text-[9px] opacity-80">
+              <span>0</span>
+              <span>{Math.max(100, maxAlt).toFixed(0)} m</span>
+            </div>
           </div>
         </div>
 
-        <div className="h-[300px]">
-          <MiniChart data={profile} color={profileColor} label="Altitude Profile" unit="m" />
+        <div className="h-[440px]">
+          <DualProfileChart
+            altitude={altitude}
+            velocity={velocity}
+            altitudeColor={altitudeColor}
+            velocityColor={velocityColor}
+          />
         </div>
       </div>
     </div>
   );
+}
+
+// ---- KML export (opens in Google Earth with the extruded "curtain") -------
+
+function esc(s: string) {
+  return s.replace(
+    /[<>&"]/g,
+    (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!,
+  );
+}
+
+function downloadKml(track: TrackPoint[], markers: Marker3D[], site: LaunchSite) {
+  const coords = track
+    .map((p) => `${p.lon.toFixed(7)},${p.lat.toFixed(7)},${p.alt.toFixed(1)}`)
+    .join("\n");
+  const pm = (name: string, p: { lat: number; lon: number; alt: number }) => `
+    <Placemark><name>${esc(name)}</name>
+      <Point><altitudeMode>relativeToGround</altitudeMode>
+        <coordinates>${p.lon.toFixed(7)},${p.lat.toFixed(7)},${p.alt.toFixed(1)}</coordinates></Point>
+    </Placemark>`;
+  const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+  <name>Rocket flight ${new Date().toISOString()}</name>
+  <Style id="track">
+    <LineStyle><color>ff3dcffd</color><width>3</width></LineStyle>
+    <PolyStyle><color>553dcffd</color></PolyStyle>
+  </Style>
+  <Placemark><name>Flight path</name><styleUrl>#track</styleUrl>
+    <LineString><extrude>1</extrude><tessellate>1</tessellate>
+      <altitudeMode>relativeToGround</altitudeMode>
+      <coordinates>
+${coords}
+      </coordinates>
+    </LineString>
+  </Placemark>
+  ${pm("Launch site", { ...site, alt: 0 })}
+  ${markers.map((m) => pm(m.label, m.point)).join("")}
+</Document>
+</kml>`;
+  const url = URL.createObjectURL(
+    new Blob([kml], { type: "application/vnd.google-earth.kml+xml" }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `rocket-flight-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.kml`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

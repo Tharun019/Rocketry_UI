@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { offsetToLatLon, type LaunchSite } from "./site";
 
 export type FlightState =
   | "BOOT"
@@ -34,44 +35,25 @@ export const ROCKET_STATE_ALIASES: Partial<Record<FlightState, string>> = {
   IMPACT: "LANDED",
 };
 
-export type CansatState =
-  | "BOOT"
-  | "STANDBY"
-  | "EJECTION"
-  | "PRIMARY_DESCENT"
-  | "CONTROLLED_DESCENT"
-  | "LANDED"
-  | "MISSION_COMPLETE";
-
-export const CANSAT_STATES: CansatState[] = [
-  "BOOT",
-  "STANDBY",
-  "EJECTION",
-  "PRIMARY_DESCENT",
-  "CONTROLLED_DESCENT",
-  "LANDED",
-  "MISSION_COMPLETE",
-];
-
 export type Sample = { t: number; v: number };
 export type LatLon = [number, number];
 
-export const CONTROLLED_DESCENT_TRIGGER_ALT = 600;
+/** One GPS fix with altitude above ground level (m). */
+export type TrackPoint = { t: number; lat: number; lon: number; alt: number };
 
 export type RocketMarkers = {
-  launch?: LatLon;
-  apogee?: LatLon;
-  drogue?: LatLon;
-  main?: LatLon;
-  landing?: LatLon;
+  launch?: TrackPoint;
+  apogee?: TrackPoint;
+  drogue?: TrackPoint;
+  main?: TrackPoint;
+  landing?: TrackPoint;
 };
 
-export type CansatMarkers = {
-  ejection?: LatLon;
-  propeller?: LatLon;
-  landing?: LatLon;
-  predicted?: LatLon;
-};
+/** Simulated wind: blows TOWARD this bearing (deg from north) at this speed. */
+const WIND = { toBearing: 65, speed: 6 };
+/** Launch rail tilt off vertical (deg). */
+const RAIL_TILT = 4;
+const TRACK_MAX = 20000; // ~66 min at 5 Hz
 
 export type RocketFrame = {
   state: FlightState;
@@ -92,6 +74,11 @@ export type RocketFrame = {
   lat: number;
   lon: number;
   path: LatLon[];
+  /** Full 3D flight track (lat, lon, AGL altitude) for the trajectory view. */
+  track: TrackPoint[];
+  /** Ground offset from the launch site, metres. */
+  east: number;
+  north: number;
   markers: RocketMarkers;
   charts: {
     altitude: Sample[];
@@ -104,38 +91,6 @@ export type RocketFrame = {
   };
 };
 
-export type CansatFrame = {
-  state: CansatState;
-  t: number;
-  altitude: number;
-  velocity: number;
-  pressure: number;
-  radiationCpm: number;
-  irTemp: number;
-  battery: number;
-  current: number;
-  propellers: "STOWED" | "DEPLOYED" | "FAILED";
-  rssi: number;
-  snr: number;
-  linkQuality: number;
-  lastPacketAt: number;
-  updateRate: number;
-  gpsValid: boolean;
-  lat: number;
-  lon: number;
-  path: LatLon[];
-  markers: CansatMarkers;
-  charts: {
-    altitude: Sample[];
-    velocity: Sample[];
-    pressure: Sample[];
-    radiation: Sample[];
-    batteryCurrent: Sample[];
-    batteryVoltage: Sample[];
-    irTemp: Sample[];
-  };
-};
-
 const MAX = 120;
 
 function push(arr: Sample[], t: number, v: number): Sample[] {
@@ -144,9 +99,9 @@ function push(arr: Sample[], t: number, v: number): Sample[] {
   return next;
 }
 
-export function useTelemetry() {
-  const t0 = useRef(Date.now());
-  const [rocket, setRocket] = useState<RocketFrame>(() => ({
+function initialFrame(site: LaunchSite): RocketFrame {
+  const pad: TrackPoint = { t: 0, lat: site.lat, lon: site.lon, alt: 0 };
+  return {
     state: "LAUNCH_PAD",
     t: 0,
     altitude: 0,
@@ -162,10 +117,13 @@ export function useTelemetry() {
     lastPacketAt: 0,
     updateRate: 5,
     gpsValid: true,
-    lat: 13.0827,
-    lon: 80.2707,
-    path: [[13.0827, 80.2707]],
-    markers: { launch: [13.0827, 80.2707] },
+    lat: site.lat,
+    lon: site.lon,
+    path: [[site.lat, site.lon]],
+    track: [pad],
+    east: 0,
+    north: 0,
+    markers: { launch: pad },
     charts: {
       altitude: [],
       velocity: [],
@@ -175,41 +133,17 @@ export function useTelemetry() {
       temperature: [],
       battery: [],
     },
-  }));
+  };
+}
 
-  const [cansat, setCansat] = useState<CansatFrame>(() => ({
-    state: "STANDBY",
-    t: 0,
-    altitude: 0,
-    velocity: 0,
-    pressure: 1013,
-    radiationCpm: 18,
-    irTemp: 22,
-    battery: 7.8,
-    current: 0.42,
-    propellers: "STOWED",
-    rssi: -71,
-    snr: 7.2,
-    linkQuality: 92,
-    lastPacketAt: 0,
-    updateRate: 5,
-    gpsValid: true,
-    lat: 13.0829,
-    lon: 80.2705,
-    path: [[13.0829, 80.2705]],
-    markers: {},
-    charts: {
-      altitude: [],
-      velocity: [],
-      pressure: [],
-      radiation: [],
-      batteryCurrent: [],
-      batteryVoltage: [],
-      irTemp: [],
-    },
-  }));
+/** Simulated telemetry. Restarts whenever the launch site changes. */
+export function useTelemetry(site: LaunchSite) {
+  const t0 = useRef(Date.now());
+  const [rocket, setRocket] = useState<RocketFrame>(() => initialFrame(site));
 
   useEffect(() => {
+    t0.current = Date.now();
+    setRocket(initialFrame(site));
     const id = setInterval(() => {
       const t = (Date.now() - t0.current) / 1000;
       const now = Date.now();
@@ -253,17 +187,39 @@ export function useTelemetry() {
           (Math.random() - 0.5) * 15,
         ];
 
-        const lat = r.lat + (Math.random() - 0.5) * 0.00008;
-        const lon = r.lon + (Math.random() - 0.5) * 0.00008;
+        // Horizontal motion: weathercock slightly upwind on ascent, drift downwind on descent.
+        const windRad = (WIND.toBearing * Math.PI) / 180;
+        let east = r.east;
+        let north = r.north;
+        if (state === "LIFTOFF" || state === "ASCENT") {
+          const h = Math.abs(vel) * Math.sin((RAIL_TILT * Math.PI) / 180) * 0.2;
+          east -= Math.sin(windRad) * h;
+          north -= Math.cos(windRad) * h;
+        } else if (state !== "LAUNCH_PAD" && state !== "IMPACT" && alt > 0) {
+          const gust = WIND.speed * (0.8 + Math.random() * 0.4) * 0.2;
+          east += Math.sin(windRad) * gust;
+          north += Math.cos(windRad) * gust;
+        }
+        const fix = offsetToLatLon(site, east, north);
+        const lat = fix.lat + (Math.random() - 0.5) * 0.00001;
+        const lon = fix.lon + (Math.random() - 0.5) * 0.00001;
         const path: LatLon[] =
           r.path.length > 160 ? [...r.path.slice(1), [lat, lon]] : [...r.path, [lat, lon]];
 
+        const point: TrackPoint = { t, lat, lon, alt };
+        const flying = state !== "LAUNCH_PAD" && !(state === "IMPACT" && r.state === "IMPACT");
+        const track = flying
+          ? r.track.length >= TRACK_MAX
+            ? [...r.track.slice(1), point]
+            : [...r.track, point]
+          : r.track;
+
         const markers = { ...r.markers };
         if (state !== r.state) {
-          if (state === "APOGEE") markers.apogee = [lat, lon];
-          if (state === "PAYLOAD_SEPARATION") markers.drogue = [lat, lon];
-          if (state === "AEROBRAKE_RELEASE") markers.main = [lat, lon];
-          if (state === "IMPACT") markers.landing = [lat, lon];
+          if (state === "APOGEE") markers.apogee = point;
+          if (state === "PAYLOAD_SEPARATION") markers.drogue = point;
+          if (state === "AEROBRAKE_RELEASE") markers.main = point;
+          if (state === "IMPACT") markers.landing = point;
         }
 
         const battery = Math.max(10.8, r.battery - 0.0008);
@@ -288,6 +244,9 @@ export function useTelemetry() {
           lat,
           lon,
           path,
+          track,
+          east,
+          north,
           markers,
           charts: {
             altitude: push(r.charts.altitude, t, alt),
@@ -300,95 +259,9 @@ export function useTelemetry() {
           },
         };
       });
-
-      setCansat((c) => {
-        let state = c.state;
-        if (t > 28 && state === "STANDBY") state = "EJECTION";
-        if (t > 34 && state === "EJECTION") state = "PRIMARY_DESCENT";
-        if (t > 60 && state === "PRIMARY_DESCENT") state = "CONTROLLED_DESCENT";
-        if (t > 95 && state === "CONTROLLED_DESCENT") state = "LANDED";
-        if (t > 105 && state === "LANDED") state = "MISSION_COMPLETE";
-
-        let alt = c.altitude;
-        let vel = c.velocity;
-        if (state === "STANDBY") {
-          alt = 0;
-        } else if (state === "EJECTION") {
-          alt = 900 + Math.random() * 30;
-          vel = -18;
-        } else if (state === "PRIMARY_DESCENT") {
-          vel = -12 + Math.random() * 2;
-          alt = Math.max(0, alt + vel * 0.2);
-        } else if (state === "CONTROLLED_DESCENT") {
-          vel = -4 + Math.random();
-          alt = Math.max(0, alt + vel * 0.2);
-        } else {
-          vel = 0;
-          alt = 0;
-        }
-
-        const propellers: CansatFrame["propellers"] =
-          state === "CONTROLLED_DESCENT" || state === "LANDED" || state === "MISSION_COMPLETE"
-            ? "DEPLOYED"
-            : "STOWED";
-
-        const lat = c.lat + (Math.random() - 0.5) * 0.00006;
-        const lon = c.lon + (Math.random() - 0.5) * 0.00006;
-        const path: LatLon[] =
-          c.path.length > 160 ? [...c.path.slice(1), [lat, lon]] : [...c.path, [lat, lon]];
-
-        const markers = { ...c.markers };
-        if (state !== c.state) {
-          if (state === "EJECTION") markers.ejection = [lat, lon];
-          if (state === "CONTROLLED_DESCENT") markers.propeller = [lat, lon];
-          if (state === "LANDED") markers.landing = [lat, lon];
-        }
-        if (!markers.predicted || state === "PRIMARY_DESCENT" || state === "CONTROLLED_DESCENT") {
-          markers.predicted = [lat + 0.00025, lon + 0.0002];
-        }
-
-        const radiationCpm = 15 + Math.random() * 10;
-        const battery = Math.max(6.6, c.battery - 0.0005);
-        const motorCurrent = propellers === "DEPLOYED" && state === "CONTROLLED_DESCENT" ? 2.3 : 0;
-        const current = 0.4 + Math.random() * 0.2 + motorCurrent * 0.3;
-        const pressure = Math.max(200, 1013 - alt * 0.11 + (Math.random() - 0.5));
-
-        return {
-          ...c,
-          state,
-          t,
-          altitude: alt,
-          velocity: vel,
-          pressure,
-          radiationCpm,
-          irTemp: 22 - alt * 0.005 + (Math.random() - 0.5) * 0.5,
-          battery,
-          current,
-          propellers,
-          rssi: -65 - Math.round(Math.random() * 18),
-          snr: Math.max(-6, Math.min(11, c.snr + (Math.random() - 0.5) * 1.4)),
-          linkQuality: Math.max(55, Math.min(100, c.linkQuality + (Math.random() - 0.5) * 4)),
-          lastPacketAt: now,
-          updateRate: 4.4 + Math.random() * 0.9,
-          gpsValid: Math.random() > 0.03,
-          lat,
-          lon,
-          path,
-          markers,
-          charts: {
-            altitude: push(c.charts.altitude, t, alt),
-            velocity: push(c.charts.velocity, t, vel),
-            pressure: push(c.charts.pressure, t, pressure),
-            radiation: push(c.charts.radiation, t, radiationCpm),
-            batteryCurrent: push(c.charts.batteryCurrent, t, current),
-            batteryVoltage: push(c.charts.batteryVoltage, t, battery),
-            irTemp: push(c.charts.irTemp, t, 22 - alt * 0.005),
-          },
-        };
-      });
     }, 200);
     return () => clearInterval(id);
-  }, []);
+  }, [site.lat, site.lon]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { rocket, cansat };
+  return { rocket };
 }

@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 export type ConsoleEntry = {
   id: number;
   t: string;
-  channel: "ROCKET" | "CANSAT" | "SYS";
+  channel: "ROCKET" | "SYS";
   cmd: string;
   ack: "ACK" | "NAK" | "PENDING";
   exec?: "PASS" | "FAIL" | "PENDING";
@@ -38,18 +38,8 @@ export function CommandConsole({ entries }: Props) {
               <span
                 className="text-[10px] px-1.5 py-px rounded border"
                 style={{
-                  color:
-                    e.channel === "ROCKET"
-                      ? "var(--rocket)"
-                      : e.channel === "CANSAT"
-                        ? "var(--cansat)"
-                        : "var(--muted-foreground)",
-                  borderColor:
-                    e.channel === "ROCKET"
-                      ? "var(--rocket-dim)"
-                      : e.channel === "CANSAT"
-                        ? "var(--cansat-dim)"
-                        : "var(--border)",
+                  color: e.channel === "ROCKET" ? "var(--rocket)" : "var(--muted-foreground)",
+                  borderColor: e.channel === "ROCKET" ? "var(--rocket-dim)" : "var(--border)",
                 }}
               >
                 {e.channel}

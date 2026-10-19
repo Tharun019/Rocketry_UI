@@ -9,7 +9,10 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "cesium:copy": "node scripts/copy-cesium.mjs",
+    "predev": "npm run cesium:copy",
+    "prebuild": "npm run cesium:copy"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -44,6 +47,7 @@
     "@tanstack/react-router": "^1.170.16",
     "@tanstack/react-start": "^1.168.26",
     "@tanstack/router-plugin": "^1.168.18",
+    "cesium": "^1.146.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
