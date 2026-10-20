@@ -15,12 +15,12 @@ export function MiniChart({ data, color, label, unit, value }: Props) {
   const id = `grad-${label.replace(/\s+/g, "-")}`;
 
   return (
-    <div className="panel px-3 py-3 flex flex-col gap-1.5 h-full">
-      <div className="flex items-baseline justify-between">
-        <span className="label-mono">{label}</span>
-        <span className="readout text-sm">
+    <div className="well px-3 pt-2.5 pb-1.5 flex flex-col gap-1 h-full min-w-0">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="eyebrow truncate">{label}</span>
+        <span className="readout text-[13px] shrink-0">
           {display}
-          {unit ? <span className="text-muted-foreground ml-1 text-[10px]">{unit}</span> : null}
+          {unit ? <span className="text-subtle ml-1 text-[10px] font-sans">{unit}</span> : null}
         </span>
       </div>
       <div className="flex-1 min-h-[54px]">
@@ -28,7 +28,7 @@ export function MiniChart({ data, color, label, unit, value }: Props) {
           <AreaChart data={data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+                <stop offset="0%" stopColor={color} stopOpacity={0.22} />
                 <stop offset="100%" stopColor={color} stopOpacity={0} />
               </linearGradient>
             </defs>

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Panel, TONE_COLOR } from "./ui";
 
 export type ConsoleEntry = {
   id: number;
@@ -13,6 +14,9 @@ type Props = {
   entries: ConsoleEntry[];
 };
 
+const ACK_COLOR = { ACK: TONE_COLOR.ok, NAK: TONE_COLOR.danger, PENDING: TONE_COLOR.warn };
+const EXEC_COLOR = { PASS: TONE_COLOR.ok, FAIL: TONE_COLOR.danger, PENDING: "var(--subtle)" };
+
 export function CommandConsole({ entries }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -20,61 +24,54 @@ export function CommandConsole({ entries }: Props) {
   }, [entries]);
 
   return (
-    <div className="panel p-3 flex flex-col gap-2 h-full min-h-[220px]">
-      <div className="flex items-center justify-between">
-        <span className="label-mono">Command Console</span>
-        <span className="label-mono text-[10px] opacity-60">{entries.length} entries</span>
+    <Panel
+      title="Command log"
+      meta={`${entries.length} ${entries.length === 1 ? "entry" : "entries"}`}
+      className="h-full min-h-[300px]"
+      bodyClassName="flex flex-col gap-1.5"
+    >
+      <div className="grid grid-cols-[64px_64px_minmax(0,1fr)_48px_48px] gap-3 px-3 eyebrow">
+        <span>Time</span>
+        <span>Channel</span>
+        <span>Command</span>
+        <span className="text-right">Ack</span>
+        <span className="text-right">Exec</span>
       </div>
       <div
         ref={ref}
-        className="flex-1 overflow-auto rounded-md bg-[oklch(0.14_0_0)] border border-border p-2 font-mono text-[11px] space-y-0.5"
+        className="well flex-1 min-h-[180px] max-h-[260px] overflow-auto scroll-quiet py-1 font-mono text-[11.5px]"
       >
         {entries.length === 0 ? (
-          <div className="text-muted-foreground text-[11px]">Awaiting commands…</div>
+          <div className="px-3 py-1.5 text-subtle font-sans text-xs">Awaiting commands…</div>
         ) : (
           entries.map((e) => (
-            <div key={e.id} className="flex items-center gap-2">
-              <span className="text-muted-foreground">{e.t}</span>
+            <div
+              key={e.id}
+              className="grid grid-cols-[64px_64px_minmax(0,1fr)_48px_48px] gap-3 items-center px-3 py-1 hover:bg-hover/50"
+            >
+              <span className="text-subtle">{e.t}</span>
               <span
-                className="text-[10px] px-1.5 py-px rounded border"
+                className="text-[10.5px]"
                 style={{
                   color: e.channel === "ROCKET" ? "var(--rocket)" : "var(--muted-foreground)",
-                  borderColor: e.channel === "ROCKET" ? "var(--rocket-dim)" : "var(--border)",
                 }}
               >
                 {e.channel}
               </span>
-              <span className="flex-1 truncate">{e.cmd}</span>
-              <span
-                className="text-[10px] w-[52px] text-right"
-                style={{
-                  color:
-                    e.ack === "ACK"
-                      ? "var(--ok)"
-                      : e.ack === "NAK"
-                        ? "var(--destructive)"
-                        : "var(--warn)",
-                }}
-              >
-                {e.ack}
+              <span className="truncate text-foreground">{e.cmd}</span>
+              <span className="text-[10.5px] text-right" style={{ color: ACK_COLOR[e.ack] }}>
+                {e.ack === "PENDING" ? "…" : e.ack}
               </span>
               <span
-                className="text-[10px] w-[56px] text-right"
-                style={{
-                  color:
-                    e.exec === "PASS"
-                      ? "var(--ok)"
-                      : e.exec === "FAIL"
-                        ? "var(--destructive)"
-                        : "var(--muted-foreground)",
-                }}
+                className="text-[10.5px] text-right"
+                style={{ color: EXEC_COLOR[e.exec ?? "PENDING"] }}
               >
-                {e.exec ?? "—"}
+                {!e.exec || e.exec === "PENDING" ? "—" : e.exec}
               </span>
             </div>
           ))
         )}
       </div>
-    </div>
+    </Panel>
   );
 }

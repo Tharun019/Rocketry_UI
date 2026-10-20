@@ -1,29 +1,40 @@
+import { TONE_COLOR, type Tone } from "./ui";
+
 type Props = {
   label: string;
-  value: string | number;
+  value?: string | number;
   unit?: string;
-  accent?: string;
   sub?: string;
+  tone?: Tone;
+  /** Multi-axis readout (e.g. X/Y/Z) shown instead of a single value. */
+  parts?: { k: string; v: string }[];
 };
 
-export function TelemetryCard({ label, value, unit, sub, accent }: Props) {
+export function TelemetryCard({ label, value, unit, sub, tone, parts }: Props) {
   return (
-    <div className="panel px-3 py-2.5 flex flex-col gap-1">
-      <div className="flex items-center gap-1.5">
-        {accent ? (
-          <span
-            className="h-1.5 w-1.5 rounded-full"
-            style={{ background: accent }}
-            aria-hidden
-          />
-        ) : null}
-        <span className="label-mono">{label}</span>
+    <div className="well px-3.5 py-3 flex flex-col gap-2 min-w-0">
+      <div className="flex items-center justify-between gap-2">
+        <span className="eyebrow truncate">{label}</span>
+        {unit ? <span className="text-[11px] text-subtle shrink-0">{unit}</span> : null}
       </div>
-      <div className="flex items-baseline gap-1.5">
-        <span className="readout text-2xl leading-none">{value}</span>
-        {unit ? <span className="label-mono text-[10px]">{unit}</span> : null}
-      </div>
-      {sub ? <span className="label-mono text-[10px] opacity-70">{sub}</span> : null}
+      {parts ? (
+        <div className="grid grid-cols-3 gap-1.5">
+          {parts.map((p) => (
+            <div key={p.k} className="min-w-0">
+              <div className="text-[10px] font-semibold text-subtle">{p.k}</div>
+              <div className="readout text-[15px] leading-tight truncate">{p.v}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div
+          className="readout text-[22px] leading-none truncate"
+          style={{ color: tone ? TONE_COLOR[tone] : undefined }}
+        >
+          {value}
+        </div>
+      )}
+      {sub ? <span className="readout text-[11px] text-subtle truncate">{sub}</span> : null}
     </div>
   );
 }

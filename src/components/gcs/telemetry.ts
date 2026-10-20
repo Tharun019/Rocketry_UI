@@ -80,6 +80,8 @@ export type RocketFrame = {
   east: number;
   north: number;
   markers: RocketMarkers;
+  /** First fix recorded in each flight state (where that state began on the track). */
+  stateFixes: Partial<Record<FlightState, TrackPoint>>;
   charts: {
     altitude: Sample[];
     velocity: Sample[];
@@ -124,6 +126,7 @@ function initialFrame(site: LaunchSite): RocketFrame {
     east: 0,
     north: 0,
     markers: { launch: pad },
+    stateFixes: { LAUNCH_PAD: pad },
     charts: {
       altitude: [],
       velocity: [],
@@ -215,6 +218,7 @@ export function useTelemetry(site: LaunchSite) {
           : r.track;
 
         const markers = { ...r.markers };
+        const stateFixes = state !== r.state ? { ...r.stateFixes, [state]: point } : r.stateFixes;
         if (state !== r.state) {
           if (state === "APOGEE") markers.apogee = point;
           if (state === "PAYLOAD_SEPARATION") markers.drogue = point;
@@ -248,6 +252,7 @@ export function useTelemetry(site: LaunchSite) {
           east,
           north,
           markers,
+          stateFixes,
           charts: {
             altitude: push(r.charts.altitude, t, alt),
             velocity: push(r.charts.velocity, t, vel),

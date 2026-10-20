@@ -1,6 +1,15 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Download, MapPin } from "lucide-react";
+import { Button, Panel, Segmented, StatusPill } from "./ui";
 import { DualProfileChart } from "./DualProfileChart";
-import { Trajectory3D, altitudeRgb, type CameraMode, type Marker3D } from "./Trajectory3D";
+import {
+  REF_ALT_M,
+  REF_COLOR,
+  Trajectory3D,
+  altitudeRgb,
+  type CameraMode,
+  type Marker3D,
+} from "./Trajectory3D";
 import { DEFAULT_SITE, distanceBearing, type LaunchSite } from "./site";
 import type { Sample, TrackPoint } from "./telemetry";
 
@@ -17,13 +26,13 @@ type Props = {
   velocity: Sample[];
   altitudeColor: string;
   velocityColor: string;
+  /** Optional strip rendered above the 3D view (e.g. the flight-state timeline). */
+  timeline?: ReactNode;
 };
 
 const MODES: { id: CameraMode; label: string }[] = [
   { id: "AUTO", label: "Auto" },
   { id: "FOLLOW", label: "Follow" },
-  { id: "TOP", label: "Top" },
-  { id: "ORBIT", label: "Orbit" },
 ];
 
 export function TrajectoryPanel({
@@ -39,8 +48,10 @@ export function TrajectoryPanel({
   velocity,
   altitudeColor,
   velocityColor,
+  timeline,
 }: Props) {
   const [mode, setMode] = useState<CameraMode>("AUTO");
+  const [adjusted, setAdjusted] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ lat: "", lon: "" });
 
@@ -73,151 +84,148 @@ export function TrajectoryPanel({
 
   const legend = [0, 0.25, 0.5, 0.75, 1].map((f) => `rgb(${altitudeRgb(f).join(",")}) ${f * 100}%`);
 
-  return (
-    <div className="panel p-3 flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span className="label-mono">{label}</span>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="label-mono text-[10px]">Site</span>
-          <span className="readout text-[11px]">
-            {site.lat.toFixed(6)}°N, {site.lon.toFixed(6)}°E
-          </span>
-          {!isDefault ? (
-            <span
-              className="label-mono text-[9px] px-1.5 py-0.5 rounded border"
-              style={{ color: "var(--warn)", borderColor: "var(--warn)" }}
-            >
-              Adjusted
-            </span>
-          ) : null}
-          <button
-            onClick={editing ? () => setEditing(false) : openEditor}
-            className="panel px-2 py-1 label-mono text-[10px] hover:bg-[oklch(0.21_0_0)]"
-          >
-            {editing ? "Cancel" : "Adjust"}
-          </button>
-        </div>
-      </div>
+  const overlay =
+    "rounded-md border border-white/10 bg-[oklch(0.14_0.006_255/0.82)] backdrop-blur-sm";
 
+  return (
+    <Panel
+      title={label}
+      meta={
+        <span className="readout">
+          Site {site.lat.toFixed(6)}° N, {site.lon.toFixed(6)}° E
+        </span>
+      }
+      actions={
+        <>
+          {!isDefault ? <StatusPill tone="warn">Adjusted site</StatusPill> : null}
+          <Button onClick={editing ? () => setEditing(false) : openEditor} active={editing}>
+            <MapPin className="h-3 w-3" />
+            {editing ? "Cancel" : "Launch site"}
+          </Button>
+          <Button onClick={() => downloadKml(track, markers, site)} disabled={track.length < 2}>
+            <Download className="h-3 w-3" /> Export KML
+          </Button>
+        </>
+      }
+      bodyClassName="flex flex-col gap-3"
+    >
       {editing ? (
-        <div className="panel p-2 flex items-end gap-2 flex-wrap">
-          <label className="flex flex-col gap-1">
-            <span className="label-mono text-[9px]">Latitude °N</span>
-            <input
-              value={draft.lat}
-              onChange={(e) => setDraft((d) => ({ ...d, lat: e.target.value }))}
-              inputMode="decimal"
-              className="panel px-2 py-1 readout text-sm w-36 bg-[oklch(0.16_0_0)]"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="label-mono text-[9px]">Longitude °E</span>
-            <input
-              value={draft.lon}
-              onChange={(e) => setDraft((d) => ({ ...d, lon: e.target.value }))}
-              inputMode="decimal"
-              className="panel px-2 py-1 readout text-sm w-36 bg-[oklch(0.16_0_0)]"
-            />
-          </label>
-          <button
-            onClick={apply}
-            className="panel px-3 py-1.5 label-mono text-[10px]"
-            style={{ borderColor: accent, color: accent }}
-          >
+        <div className="well p-3 flex items-end gap-3 flex-wrap">
+          <SiteInput
+            label="Latitude (° N)"
+            value={draft.lat}
+            onChange={(v) => setDraft((d) => ({ ...d, lat: v }))}
+          />
+          <SiteInput
+            label="Longitude (° E)"
+            value={draft.lon}
+            onChange={(v) => setDraft((d) => ({ ...d, lon: v }))}
+          />
+          <Button size="md" variant="primary" onClick={apply}>
             Apply
-          </button>
-          <button
+          </Button>
+          <Button
+            size="md"
+            variant="ghost"
             onClick={() => {
               onSiteReset();
               setEditing(false);
             }}
-            className="panel px-3 py-1.5 label-mono text-[10px] hover:bg-[oklch(0.21_0_0)]"
           >
             Reset to competition default
-          </button>
-          <span className="label-mono text-[9px] opacity-70">
+          </Button>
+          <span className="text-[11px] text-subtle ml-auto">
             Saved in this browser · restarts the simulation
           </span>
         </div>
       ) : null}
 
+      {timeline}
+
       <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-3">
-        <div className="relative h-[440px] rounded-md overflow-hidden border border-border bg-[oklch(0.14_0_0)]">
+        <div className="relative h-[460px] rounded-md overflow-hidden border border-border bg-well">
           <Trajectory3D
             track={track}
             markers={markers}
             site={site}
             mode={mode}
-            onModeChange={setMode}
+            adjusted={adjusted}
+            onAdjust={() => setAdjusted(true)}
           />
 
           {/* Camera controls */}
-          <div className="absolute top-2 left-2 flex gap-1 z-10">
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setMode(m.id)}
-                className="px-2 py-1 rounded label-mono text-[9.5px] border backdrop-blur bg-[oklch(0.12_0_0/0.7)]"
-                style={{
-                  borderColor: mode === m.id ? accent : "oklch(0.35 0 0)",
-                  color: mode === m.id ? accent : undefined,
-                }}
+          <div className="absolute top-3 left-3 flex items-center gap-2 z-10">
+            <Segmented
+              options={MODES}
+              value={mode}
+              onChange={(m) => {
+                setMode(m);
+                setAdjusted(false);
+              }}
+              className="bg-[oklch(0.14_0.006_255/0.82)] backdrop-blur-sm border-white/10"
+            />
+            {adjusted ? (
+              <span
+                className={`${overlay} px-2 h-7 inline-flex items-center text-[11px] text-muted-foreground`}
               >
-                {m.label}
-              </button>
-            ))}
-            {mode === "FREE" ? (
-              <span className="px-2 py-1 label-mono text-[9.5px] opacity-70">Manual</span>
+                Manual view · pick a mode to reframe
+              </span>
             ) : null}
           </div>
 
-          <div className="absolute top-2 right-2 flex gap-1 z-10">
-            <button
-              onClick={() => downloadKml(track, markers, site)}
-              disabled={track.length < 2}
-              className="px-2 py-1 rounded label-mono text-[9.5px] border border-[oklch(0.35_0_0)] backdrop-blur bg-[oklch(0.12_0_0/0.7)] disabled:opacity-40"
-            >
-              Export KML
-            </button>
+          <div className="absolute top-3 right-3 z-10">
             <span
-              className="px-2 py-1 label-mono text-[9.5px] flex items-center gap-1.5"
+              className={`${overlay} px-2 h-7 inline-flex items-center gap-1.5 text-[11px] font-semibold`}
               style={{ color: accent }}
             >
               <span className="h-1.5 w-1.5 rounded-full dot-pulse" style={{ background: accent }} />
-              Live
+              LIVE
             </span>
           </div>
 
           {/* Readouts */}
-          <div className="absolute bottom-7 left-2 z-10 grid grid-cols-4 gap-px rounded overflow-hidden border border-[oklch(0.3_0_0)] bg-[oklch(0.3_0_0)] pointer-events-none">
+          <div
+            className={`absolute bottom-8 left-3 z-10 grid grid-cols-5 divide-x divide-white/10 pointer-events-none ${overlay}`}
+          >
             {[
-              ["ALT AGL", `${last.alt.toFixed(0)} m`],
-              ["MAX ALT", `${maxAlt.toFixed(0)} m`],
-              ["FROM SITE", `${dist.toFixed(0)} m @ ${bearing.toFixed(0)}°`],
-              ["V · HDG", `${velocityNow.toFixed(1)} m/s · ${heading.toFixed(0)}°`],
+              ["Alt AGL", `${last.alt.toFixed(0)} m`],
+              ["Max alt", `${maxAlt.toFixed(0)} m`],
+              ["From site", `${dist.toFixed(0)} m · ${bearing.toFixed(0)}°`],
+              ["Vel · Hdg", `${velocityNow.toFixed(1)} m/s · ${heading.toFixed(0)}°`],
             ].map(([k, v]) => (
-              <div key={k} className="px-2 py-1 bg-[oklch(0.12_0_0/0.82)]">
-                <div className="label-mono text-[8.5px] opacity-70">{k}</div>
-                <div className="readout text-[11px]">{v}</div>
+              <div key={k} className="px-2.5 py-1.5">
+                <div className="eyebrow text-[10px]">{k}</div>
+                <div className="readout text-xs mt-0.5">{v}</div>
               </div>
             ))}
+            <div className="px-2.5 py-1.5">
+              <div className="eyebrow text-[10px]" style={{ color: REF_COLOR }}>
+                vs {REF_ALT_M} m
+              </div>
+              <div className="readout text-xs mt-0.5" style={{ color: REF_COLOR }}>
+                {last.alt - REF_ALT_M >= 0 ? "+" : "−"}
+                {Math.abs(last.alt - REF_ALT_M).toFixed(0)} m
+              </div>
+            </div>
           </div>
 
           {/* Altitude colour legend */}
-          <div className="absolute bottom-7 right-2 z-10 flex flex-col items-end gap-1 pointer-events-none">
-            <span className="label-mono text-[8.5px] opacity-70">Altitude</span>
+          <div
+            className={`absolute bottom-8 right-3 z-10 flex flex-col gap-1 px-2.5 py-1.5 pointer-events-none ${overlay}`}
+          >
+            <span className="eyebrow text-[10px]">Altitude</span>
             <div
-              className="h-1.5 w-28 rounded"
+              className="h-1.5 w-28 rounded-full"
               style={{ background: `linear-gradient(90deg, ${legend.join(",")})` }}
             />
-            <div className="w-28 flex justify-between readout text-[9px] opacity-80">
+            <div className="w-28 flex justify-between readout text-[10px] text-muted-foreground">
               <span>0</span>
               <span>{Math.max(100, maxAlt).toFixed(0)} m</span>
             </div>
           </div>
         </div>
 
-        <div className="h-[440px]">
+        <div className="h-[460px]">
           <DualProfileChart
             altitude={altitude}
             velocity={velocity}
@@ -226,7 +234,29 @@ export function TrajectoryPanel({
           />
         </div>
       </div>
-    </div>
+    </Panel>
+  );
+}
+
+function SiteInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="eyebrow">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        inputMode="decimal"
+        className="h-9 w-40 rounded-md border border-border bg-panel px-2.5 readout text-[13px] focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-ring/40"
+      />
+    </label>
   );
 }
 

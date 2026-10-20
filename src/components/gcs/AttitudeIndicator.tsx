@@ -1,3 +1,5 @@
+import { Panel } from "./ui";
+
 type Props = {
   pitch: number; // deg
   roll: number; // deg
@@ -6,71 +8,96 @@ type Props = {
   label: string;
 };
 
+const ROLL_TICKS = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60];
+const PITCH_LADDER = [-30, -20, -10, 10, 20, 30];
+
 export function AttitudeIndicator({ pitch, roll, yaw, accent, label }: Props) {
   const p = Math.max(-45, Math.min(45, pitch));
   return (
-    <div className="panel p-3 flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <span className="label-mono">{label}</span>
-        <span className="label-mono text-[10px]" style={{ color: accent }}>
-          ATTITUDE
-        </span>
-      </div>
-      <div className="relative aspect-square rounded-full overflow-hidden border border-border bg-[oklch(0.16_0_0)]">
+    <Panel title="Attitude" meta={label} bodyClassName="flex flex-col gap-3">
+      <div className="relative aspect-square w-full max-w-[260px] mx-auto rounded-full overflow-hidden border border-border-strong bg-well">
         <div
           className="absolute inset-0"
-          style={{
-            transform: `rotate(${-roll}deg)`,
-            transition: "transform 200ms linear",
-          }}
+          style={{ transform: `rotate(${-roll}deg)`, transition: "transform 200ms linear" }}
         >
+          {/* sky / ground */}
           <div
-            className="absolute inset-x-0"
+            className="absolute -inset-x-1/4"
+            style={{
+              top: `${50 - p - 100}%`,
+              height: "100%",
+              background: "linear-gradient(to bottom, oklch(0.26 0.04 245), oklch(0.36 0.06 240))",
+            }}
+          />
+          <div
+            className="absolute -inset-x-1/4"
             style={{
               top: `${50 - p}%`,
-              height: "50%",
-              background: "linear-gradient(to bottom, oklch(0.32 0.05 55), oklch(0.24 0.03 55))",
-              opacity: 0.5,
+              height: "100%",
+              background: "linear-gradient(to bottom, oklch(0.33 0.04 60), oklch(0.22 0.025 60))",
             }}
           />
-          <div
-            className="absolute inset-x-0"
-            style={{
-              top: `${50 - p + 50}%`,
-              height: "50%",
-              background: "linear-gradient(to bottom, oklch(0.22 0.02 240), oklch(0.16 0.02 240))",
-              opacity: 0.5,
-            }}
-          />
-          <div
-            className="absolute inset-x-0 h-px"
-            style={{ top: `${50 - p}%`, background: accent }}
-          />
+          <div className="absolute inset-x-0 h-px bg-foreground/80" style={{ top: `${50 - p}%` }} />
+          {/* pitch ladder (1% of height per degree, matching the horizon offset) */}
+          {PITCH_LADDER.map((d) => (
+            <div
+              key={d}
+              className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5"
+              style={{ top: `${50 - p - d}%` }}
+            >
+              <span className="readout text-[9px] text-foreground/60 w-4 text-right">
+                {Math.abs(d)}
+              </span>
+              <span
+                className="h-px bg-foreground/50"
+                style={{ width: Math.abs(d) % 20 === 0 ? 44 : 24 }}
+              />
+              <span className="readout text-[9px] text-foreground/60 w-4">{Math.abs(d)}</span>
+            </div>
+          ))}
         </div>
-        {/* fixed crosshair */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="relative">
-            <div className="absolute -translate-x-1/2 -translate-y-1/2 w-16 h-px bg-foreground/80" />
-            <div className="absolute -translate-x-1/2 -translate-y-1/2 h-3 w-px bg-foreground/80" />
+
+        {/* roll scale */}
+        <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full pointer-events-none">
+          {ROLL_TICKS.map((a) => (
+            <line
+              key={a}
+              x1="50"
+              y1="4"
+              x2="50"
+              y2={a % 30 === 0 ? 10 : 7.5}
+              stroke="currentColor"
+              strokeWidth={a === 0 ? 1 : 0.6}
+              className="text-foreground/70"
+              transform={`rotate(${a} 50 50)`}
+            />
+          ))}
+          <path d="M50 11 L47.8 15 L52.2 15 Z" fill={accent} transform={`rotate(${-roll} 50 50)`} />
+          {/* fixed aircraft symbol */}
+          <path
+            d="M28 50 H42 L46 54 M72 50 H58 L54 54"
+            fill="none"
+            stroke={accent}
+            strokeWidth={1.6}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <circle cx="50" cy="50" r="1.4" fill={accent} />
+        </svg>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          ["Pitch", pitch],
+          ["Roll", roll],
+          ["Yaw", yaw],
+        ].map(([k, v]) => (
+          <div key={k as string} className="well px-2.5 py-2 text-center">
+            <div className="eyebrow">{k}</div>
+            <div className="readout text-sm mt-0.5">{(v as number).toFixed(1)}°</div>
           </div>
-        </div>
-        {/* roll ticks */}
-        <div className="absolute inset-2 rounded-full border border-border/60 pointer-events-none" />
+        ))}
       </div>
-      <div className="grid grid-cols-3 gap-1.5 text-center">
-        <div>
-          <div className="label-mono text-[9px]">Pitch</div>
-          <div className="readout text-xs">{pitch.toFixed(1)}°</div>
-        </div>
-        <div>
-          <div className="label-mono text-[9px]">Roll</div>
-          <div className="readout text-xs">{roll.toFixed(1)}°</div>
-        </div>
-        <div>
-          <div className="label-mono text-[9px]">Yaw</div>
-          <div className="readout text-xs">{yaw.toFixed(1)}°</div>
-        </div>
-      </div>
-    </div>
+    </Panel>
   );
 }

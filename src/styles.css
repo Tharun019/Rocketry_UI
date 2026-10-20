@@ -39,51 +39,60 @@
   --color-warn: var(--warn);
   --color-panel: var(--panel);
   --color-panel-2: var(--panel-2);
+  --color-well: var(--well);
+  --color-hover: var(--hover);
+  --color-subtle: var(--subtle);
+  --color-border-strong: var(--border-strong);
 
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
+/* Slate-tinted dark theme: one brand accent (rocket orange) plus status colours. */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
+  --background: oklch(0.155 0.006 255);
+  --foreground: oklch(0.955 0.004 255);
 
-  --panel: oklch(0.175 0 0);
-  --panel-2: oklch(0.205 0 0);
+  --panel: oklch(0.188 0.007 255);
+  --panel-2: oklch(0.21 0.008 255);
+  --well: oklch(0.168 0.006 255);
+  --hover: oklch(0.245 0.009 255);
 
-  --card: oklch(0.175 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.19 0 0);
-  --popover-foreground: oklch(0.985 0 0);
+  --card: var(--panel);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.2 0.008 255);
+  --popover-foreground: var(--foreground);
 
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.145 0 0);
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
 
-  --secondary: oklch(0.24 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.24 0.008 255);
+  --secondary-foreground: var(--foreground);
 
-  --muted: oklch(0.22 0 0);
-  --muted-foreground: oklch(0.62 0 0);
+  --muted: oklch(0.23 0.008 255);
+  --muted-foreground: oklch(0.7 0.012 255);
+  --subtle: oklch(0.56 0.012 255);
 
-  --accent: oklch(0.24 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --accent: oklch(0.24 0.008 255);
+  --accent-foreground: var(--foreground);
 
-  --destructive: oklch(0.62 0.22 25);
+  --destructive: oklch(0.65 0.2 25);
   --destructive-foreground: oklch(0.985 0 0);
 
-  --border: oklch(0.26 0 0);
-  --input: oklch(0.26 0 0);
-  --ring: oklch(0.55 0 0);
+  --border: oklch(0.265 0.009 255);
+  --border-strong: oklch(0.34 0.012 255);
+  --input: var(--border);
+  --ring: oklch(0.6 0.02 255);
 
-  --rocket: oklch(0.76 0.16 55);
-  --rocket-dim: oklch(0.5 0.12 55);
-  --cansat: oklch(0.82 0.12 210);
-  --cansat-dim: oklch(0.55 0.09 210);
+  --rocket: oklch(0.74 0.15 55);
+  --rocket-dim: oklch(0.5 0.11 55);
+  --cansat: oklch(0.8 0.11 210);
+  --cansat-dim: oklch(0.55 0.08 210);
 
-  --ok: oklch(0.78 0.15 155);
-  --warn: oklch(0.78 0.16 85);
+  --ok: oklch(0.75 0.14 155);
+  --warn: oklch(0.8 0.14 80);
 }
 
 @layer base {
@@ -96,25 +105,26 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
   }
 
-  body {
-    background-image:
-      radial-gradient(1200px 600px at 15% -10%, oklch(0.22 0 0) 0%, transparent 60%),
-      radial-gradient(1000px 500px at 90% -10%, oklch(0.2 0 0) 0%, transparent 55%);
-    background-attachment: fixed;
+  ::selection {
+    background: color-mix(in oklch, var(--rocket) 35%, transparent);
   }
 }
 
-@utility label-mono {
-  font-family: var(--font-mono);
+/* Small section / field label. */
+@utility eyebrow {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.68rem;
-  color: var(--color-muted-foreground);
+  color: var(--color-subtle);
 }
 
+/* Numeric readouts: monospaced, tabular. */
 @utility readout {
   font-family: var(--font-mono);
   font-weight: 500;
@@ -122,17 +132,37 @@
   letter-spacing: -0.01em;
 }
 
+/* Top-level surface. */
 @utility panel {
   background-color: var(--color-panel);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+  box-shadow: 0 1px 0 0 oklch(1 0 0 / 0.025) inset, 0 1px 2px 0 oklch(0 0 0 / 0.25);
+}
+
+/* Recessed area inside a panel (cards, logs, inputs). */
+@utility well {
+  background-color: var(--color-well);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 
 @keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .dot-pulse {
   animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+/* Quiet scrollbars for the log areas. */
+.scroll-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }

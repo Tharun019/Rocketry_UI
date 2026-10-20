@@ -1,5 +1,15 @@
-import { CartesianGrid, Line, LineChart, ReferenceDot, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceDot,
+  ReferenceLine,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+} from "recharts";
 import type { Sample } from "./telemetry";
+import { REF_ALT_M, REF_COLOR } from "./Trajectory3D";
 
 type Props = {
   altitude: Sample[];
@@ -8,11 +18,14 @@ type Props = {
   velocityColor: string;
 };
 
-const PAST_COLOR = "oklch(0.62 0.2 25)"; // red
-const PRESENT_COLOR = "oklch(0.85 0.17 95)"; // yellow
-const FUTURE_COLOR = "oklch(0.75 0.16 150)"; // green
+const PAST_COLOR = "oklch(0.65 0.2 25)"; // red
+const PRESENT_COLOR = "oklch(0.85 0.15 95)"; // yellow
+const FUTURE_COLOR = "oklch(0.75 0.14 155)"; // green
+const GRID = "oklch(0.265 0.009 255)";
+const AXIS = "oklch(0.34 0.012 255)";
+const AXIS_LABEL = "oklch(0.56 0.012 255)";
 
-const axisTick = { fontSize: 9, fontFamily: "var(--font-mono, monospace)", fill: "oklch(0.6 0 0)" };
+const axisTick = { fontSize: 9, fontFamily: "var(--font-mono, monospace)", fill: AXIS_LABEL };
 
 const FUTURE_STEPS = 40;
 
@@ -61,36 +74,36 @@ export function DualProfileChart({ altitude, velocity, altitudeColor, velocityCo
   const lastVel = velocity.at(-1);
 
   return (
-    <div className="panel px-3 py-3 flex flex-col gap-1.5 h-full">
+    <div className="well px-3 pt-3 pb-2.5 flex flex-col gap-2 h-full">
       <div className="flex items-baseline justify-between">
-        <span className="label-mono">Altitude & Velocity Profile</span>
+        <span className="eyebrow">Altitude &amp; velocity profile</span>
         <div className="flex items-center gap-3">
           <span className="readout text-sm" style={{ color: altitudeColor }}>
             {typeof lastAlt?.v === "number" ? lastAlt.v.toFixed(1) : "—"}
-            <span className="text-muted-foreground ml-1 text-[10px]">m</span>
+            <span className="text-subtle ml-1 text-[10px] font-sans">m</span>
           </span>
           <span className="readout text-sm" style={{ color: velocityColor }}>
             {typeof lastVel?.v === "number" ? lastVel.v.toFixed(1) : "—"}
-            <span className="text-muted-foreground ml-1 text-[10px]">m/s</span>
+            <span className="text-subtle ml-1 text-[10px] font-sans">m/s</span>
           </span>
         </div>
       </div>
       <div className="flex-1 min-h-[54px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
-            <CartesianGrid stroke="oklch(0.24 0 0)" strokeWidth={0.5} vertical={false} />
+            <CartesianGrid stroke={GRID} strokeWidth={0.5} vertical={false} />
             <XAxis
               dataKey="t"
               tick={axisTick}
               tickFormatter={(v: number) => v.toFixed(0)}
-              stroke="oklch(0.3 0 0)"
+              stroke={AXIS}
               tickLine={false}
               label={{
-                value: "TIME (s)",
+                value: "Time (s)",
                 position: "insideBottom",
                 offset: -4,
                 fontSize: 9,
-                fill: "oklch(0.55 0 0)",
+                fill: AXIS_LABEL,
               }}
               minTickGap={24}
             />
@@ -98,12 +111,12 @@ export function DualProfileChart({ altitude, velocity, altitudeColor, velocityCo
               yAxisId="velocity"
               tick={{ ...axisTick, fill: velocityColor }}
               tickFormatter={(v: number) => v.toFixed(0)}
-              stroke="oklch(0.3 0 0)"
+              stroke={AXIS}
               tickLine={false}
               width={34}
               domain={["auto", "auto"]}
               label={{
-                value: "VEL (m/s)",
+                value: "Velocity (m/s)",
                 angle: -90,
                 position: "insideLeft",
                 fontSize: 9,
@@ -115,12 +128,12 @@ export function DualProfileChart({ altitude, velocity, altitudeColor, velocityCo
               orientation="right"
               tick={{ ...axisTick, fill: altitudeColor }}
               tickFormatter={(v: number) => v.toFixed(0)}
-              stroke="oklch(0.3 0 0)"
+              stroke={AXIS}
               tickLine={false}
               width={34}
               domain={["auto", "auto"]}
               label={{
-                value: "ALT (m)",
+                value: "Altitude (m)",
                 angle: 90,
                 position: "insideRight",
                 fontSize: 9,
@@ -128,22 +141,88 @@ export function DualProfileChart({ altitude, velocity, altitudeColor, velocityCo
               }}
             />
 
-            <Line yAxisId="velocity" type="monotone" dataKey="velocity_past" stroke={PAST_COLOR} strokeWidth={1.5} strokeDasharray="3 2" dot={false} isAnimationActive={false} connectNulls />
-            <Line yAxisId="velocity" type="monotone" dataKey="velocity_future" stroke={FUTURE_COLOR} strokeWidth={1.5} strokeDasharray="3 2" dot={false} isAnimationActive={false} connectNulls />
+            <Line
+              yAxisId="velocity"
+              type="monotone"
+              dataKey="velocity_past"
+              stroke={PAST_COLOR}
+              strokeWidth={1.5}
+              strokeDasharray="3 2"
+              dot={false}
+              isAnimationActive={false}
+              connectNulls
+            />
+            <Line
+              yAxisId="velocity"
+              type="monotone"
+              dataKey="velocity_future"
+              stroke={FUTURE_COLOR}
+              strokeWidth={1.5}
+              strokeDasharray="3 2"
+              dot={false}
+              isAnimationActive={false}
+              connectNulls
+            />
 
-            <Line yAxisId="altitude" type="monotone" dataKey="altitude_past" stroke={PAST_COLOR} strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
-            <Line yAxisId="altitude" type="monotone" dataKey="altitude_future" stroke={FUTURE_COLOR} strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
+            <Line
+              yAxisId="altitude"
+              type="monotone"
+              dataKey="altitude_past"
+              stroke={PAST_COLOR}
+              strokeWidth={1.5}
+              dot={false}
+              isAnimationActive={false}
+              connectNulls
+            />
+            <Line
+              yAxisId="altitude"
+              type="monotone"
+              dataKey="altitude_future"
+              stroke={FUTURE_COLOR}
+              strokeWidth={1.5}
+              dot={false}
+              isAnimationActive={false}
+              connectNulls
+            />
+
+            <ReferenceLine
+              yAxisId="altitude"
+              y={REF_ALT_M}
+              stroke={REF_COLOR}
+              strokeWidth={1.5}
+              ifOverflow="extendDomain"
+              label={{
+                value: `${REF_ALT_M} m`,
+                position: "insideTopLeft",
+                fontSize: 9,
+                fill: REF_COLOR,
+              }}
+            />
 
             {lastAlt ? (
-              <ReferenceDot yAxisId="altitude" x={lastAlt.t} y={lastAlt.v} r={3} fill={PRESENT_COLOR} stroke="none" />
+              <ReferenceDot
+                yAxisId="altitude"
+                x={lastAlt.t}
+                y={lastAlt.v}
+                r={3}
+                fill={PRESENT_COLOR}
+                stroke="none"
+              />
             ) : null}
             {lastVel ? (
-              <ReferenceDot yAxisId="velocity" x={lastVel.t} y={lastVel.v} r={3} fill={PRESENT_COLOR} stroke="none" />
+              <ReferenceDot
+                yAxisId="velocity"
+                x={lastVel.t}
+                y={lastVel.v}
+                r={3}
+                fill={PRESENT_COLOR}
+                stroke="none"
+              />
             ) : null}
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <div className="flex items-center gap-3 flex-wrap label-mono text-[8.5px] opacity-80">
+      <div className="flex items-center gap-3 flex-wrap text-[10.5px] text-muted-foreground">
         <span className="flex items-center gap-1">
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: PAST_COLOR }} />
           Past
@@ -156,7 +235,7 @@ export function DualProfileChart({ altitude, velocity, altitudeColor, velocityCo
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: FUTURE_COLOR }} />
           Predicted
         </span>
-        <span className="opacity-60">|</span>
+        <span className="h-3 w-px bg-border" />
         <span>— Altitude</span>
         <span>┄ Velocity</span>
       </div>

@@ -13,9 +13,12 @@ import {
 } from "@/components/gcs/AlertsPanel";
 import { CommandConsole, type ConsoleEntry } from "@/components/gcs/CommandConsole";
 import type { CmdStage } from "@/components/gcs/CommandButton";
-import { useTelemetry } from "@/components/gcs/telemetry";
+import { ROCKET_STATES, ROCKET_STATE_ALIASES, useTelemetry } from "@/components/gcs/telemetry";
 import { useLaunchSite } from "@/components/gcs/site";
 import type { Marker3D } from "@/components/gcs/Trajectory3D";
+import { StateTimeline } from "@/components/gcs/StateTimeline";
+import { Button, Panel, Segmented } from "@/components/gcs/ui";
+import { Pause, Play } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: GroundStation,
@@ -91,26 +94,37 @@ function GroundStation() {
   ) => {
     const id = nextId.current++;
     setEntries((e) =>
-      [...e, { id, t: stamp(), channel, cmd, ack: "PENDING" as const, exec: "PENDING" as const }].slice(-80),
+      [
+        ...e,
+        { id, t: stamp(), channel, cmd, ack: "PENDING" as const, exec: "PENDING" as const },
+      ].slice(-80),
     );
     onStage?.("SENT");
 
     const acked = Math.random() > 0.06;
-    setTimeout(() => {
-      setEntries((e) => e.map((x) => (x.id === id ? { ...x, ack: acked ? "ACK" : "NAK" } : x)));
-      onStage?.(acked ? "ACK" : "NAK");
-      if (!acked) {
-        setEntries((e) => e.map((x) => (x.id === id ? { ...x, exec: "FAIL" } : x)));
-        if (cmd.startsWith("DEPLOY")) raiseParachuteFailure();
-        return;
-      }
-      const passed = Math.random() > 0.08;
-      setTimeout(() => {
-        setEntries((e) => e.map((x) => (x.id === id ? { ...x, exec: passed ? "PASS" : "FAIL" } : x)));
-        onStage?.(passed ? "PASS" : "FAIL");
-        if (!passed && cmd.startsWith("DEPLOY")) raiseParachuteFailure();
-      }, 500 + Math.random() * 500);
-    }, 400 + Math.random() * 400);
+    setTimeout(
+      () => {
+        setEntries((e) => e.map((x) => (x.id === id ? { ...x, ack: acked ? "ACK" : "NAK" } : x)));
+        onStage?.(acked ? "ACK" : "NAK");
+        if (!acked) {
+          setEntries((e) => e.map((x) => (x.id === id ? { ...x, exec: "FAIL" } : x)));
+          if (cmd.startsWith("DEPLOY")) raiseParachuteFailure();
+          return;
+        }
+        const passed = Math.random() > 0.08;
+        setTimeout(
+          () => {
+            setEntries((e) =>
+              e.map((x) => (x.id === id ? { ...x, exec: passed ? "PASS" : "FAIL" } : x)),
+            );
+            onStage?.(passed ? "PASS" : "FAIL");
+            if (!passed && cmd.startsWith("DEPLOY")) raiseParachuteFailure();
+          },
+          500 + Math.random() * 500,
+        );
+      },
+      400 + Math.random() * 400,
+    );
   };
 
   // ---- Alerts ------------------------------------------------------------
@@ -122,22 +136,43 @@ function GroundStation() {
 
   const now = Date.now();
   const conditions = useMemo(() => {
-    const list: { type: AlertType; level: "warn" | "danger"; source: ActiveAlert["source"]; detail?: string }[] = [];
+    const list: {
+      type: AlertType;
+      level: "warn" | "danger";
+      source: ActiveAlert["source"];
+      detail?: string;
+    }[] = [];
     const rocketStale = rocket.lastPacketAt > 0 && now - rocket.lastPacketAt > 3000;
     if (rocket.linkQuality < 62 || rocket.rssi < -100)
       list.push({ type: "COMMUNICATION LOST", level: "danger", source: "ROCKET" });
     if (rocketStale) list.push({ type: "TELEMETRY TIMEOUT", level: "danger", source: "ROCKET" });
     if (rocket.battery < 11.2)
-      list.push({ type: "LOW BATTERY", level: "warn", source: "ROCKET", detail: `${rocket.battery.toFixed(2)} V` });
+      list.push({
+        type: "LOW BATTERY",
+        level: "warn",
+        source: "ROCKET",
+        detail: `${rocket.battery.toFixed(2)} V`,
+      });
     if (rocket.temperature > 45)
-      list.push({ type: "HIGH TEMPERATURE", level: "warn", source: "ROCKET", detail: `${rocket.temperature.toFixed(1)} °C` });
+      list.push({
+        type: "HIGH TEMPERATURE",
+        level: "warn",
+        source: "ROCKET",
+        detail: `${rocket.temperature.toFixed(1)} °C`,
+      });
     if (!rocket.gpsValid) list.push({ type: "GPS INVALID", level: "warn", source: "ROCKET" });
     if (parachuteFail)
       list.push({ type: "PARACHUTE COMMAND FAILED", level: "danger", source: "SYS" });
     return list;
   }, [
-    rocket.linkQuality, rocket.rssi, rocket.battery, rocket.temperature, rocket.gpsValid, rocket.lastPacketAt,
-    parachuteFail, now,
+    rocket.linkQuality,
+    rocket.rssi,
+    rocket.battery,
+    rocket.temperature,
+    rocket.gpsValid,
+    rocket.lastPacketAt,
+    parachuteFail,
+    now,
   ]);
 
   const [activeAlerts, setActiveAlerts] = useState<ActiveAlert[]>([]);
@@ -158,8 +193,20 @@ function GroundStation() {
         setAlertHistory((h) =>
           [
             ...h,
-            ...added.map((a) => ({ id: alertId.current++, type: a.type, source: a.source, time: stamp(), action: "RAISED" as const })),
-            ...removed.map((a) => ({ id: alertId.current++, type: a.type, source: a.source, time: stamp(), action: "CLEARED" as const })),
+            ...added.map((a) => ({
+              id: alertId.current++,
+              type: a.type,
+              source: a.source,
+              time: stamp(),
+              action: "RAISED" as const,
+            })),
+            ...removed.map((a) => ({
+              id: alertId.current++,
+              type: a.type,
+              source: a.source,
+              time: stamp(),
+              action: "CLEARED" as const,
+            })),
           ].slice(-60),
         );
       }
@@ -201,19 +248,33 @@ function GroundStation() {
 
   // Apogee = highest recorded fix (firmware APOGEE state can lag the true peak).
   const apogeePoint = useMemo(
-    () => rocket.track.reduce<(typeof rocket.track)[number] | null>((best, p) => (!best || p.alt > best.alt ? p : best), null),
+    () =>
+      rocket.track.reduce<(typeof rocket.track)[number] | null>(
+        (best, p) => (!best || p.alt > best.alt ? p : best),
+        null,
+      ),
     [rocket.track],
   );
+  // Flight-state callouts on the 3D path: each state at the fix where it began.
+  // Up to apogee they sit in the left column, the descent states in the right one.
   const flightMarkers = useMemo(() => {
-    const m = rocket.markers;
-    const pastApogee = rocket.state !== "LAUNCH_PAD" && rocket.state !== "LIFTOFF" && rocket.state !== "ASCENT";
-    return [
-      pastApogee && apogeePoint && apogeePoint.alt > 0 && { key: "apogee", label: "APOGEE", point: apogeePoint, color: "#fde725" },
-      m.drogue && { key: "drogue", label: "DROGUE", point: m.drogue, color: "#c89bff", labelSide: "right" },
-      m.main && { key: "main", label: "MAIN / AEROBRAKE", point: m.main, color: "#6fd3ff" },
-      m.landing && { key: "landing", label: "LANDING", point: m.landing, color: "#ff6b6b", labelSide: "right" },
-    ].filter((x): x is Marker3D => Boolean(x));
-  }, [rocket.markers, rocket.state, apogeePoint]);
+    const apogeeIdx = ROCKET_STATES.indexOf("APOGEE");
+    return ROCKET_STATES.flatMap((s, i): Marker3D[] => {
+      const fix = rocket.stateFixes[s];
+      if (!fix) return [];
+      const point = s === "APOGEE" && apogeePoint ? apogeePoint : fix;
+      const alias = ROCKET_STATE_ALIASES[s];
+      return [
+        {
+          key: s,
+          label: s.replace(/_/g, " "),
+          sub: `${alias ? `[${alias}] · ` : ""}${point.alt.toFixed(0)} m`,
+          point,
+          side: i <= apogeeIdx ? "left" : "right",
+        },
+      ];
+    });
+  }, [rocket.stateFixes, apogeePoint]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -225,16 +286,14 @@ function GroundStation() {
         systemStatus={systemStatus}
       />
 
-      <main className="flex-1 p-4 flex flex-col gap-4">
-        <div className="panel p-4">
-          <RocketDashboard
-            data={rocket}
-            onCommand={(c, onStage) => pushCommand("ROCKET", c, onStage)}
-          />
-        </div>
+      <main className="flex-1 w-full mx-auto max-w-[1920px] px-6 py-5 flex flex-col gap-4">
+        <RocketDashboard
+          data={rocket}
+          onCommand={(c, onStage) => pushCommand("ROCKET", c, onStage)}
+        />
 
         <TrajectoryPanel
-          label="Rocket Flight Path · 3D"
+          label="Flight path"
           accent="var(--rocket)"
           track={rocket.track}
           markers={flightMarkers}
@@ -246,6 +305,14 @@ function GroundStation() {
           velocity={rocket.charts.velocity}
           altitudeColor="var(--rocket)"
           velocityColor="oklch(0.9 0 0)"
+          timeline={
+            <StateTimeline
+              states={ROCKET_STATES}
+              current={rocket.state}
+              accent="var(--rocket)"
+              aliases={ROCKET_STATE_ALIASES}
+            />
+          }
         />
 
         <div className="grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1fr)] gap-4">
@@ -265,54 +332,47 @@ function GroundStation() {
             rateHz={rocket.updateRate}
             status={linkStatus(rocket.linkQuality, rocket.lastPacketAt)}
           />
-          <div className="panel p-3 flex flex-col gap-2 md:col-span-2 xl:col-span-1">
-            <span className="label-mono">RF Config & Playback</span>
-            <div className="flex flex-col gap-1.5 text-xs">
-              <label className="label-mono text-[10px]">Frequency</label>
+          <Panel
+            title="Radio & playback"
+            meta="Ground station"
+            className="md:col-span-2 xl:col-span-1"
+            bodyClassName="flex flex-col gap-4"
+          >
+            <label className="flex flex-col gap-1.5">
+              <span className="eyebrow">Frequency</span>
               <select
                 value={rfChannel}
                 onChange={(e) => setRfChannel(e.target.value)}
-                className="panel px-2 py-1.5 bg-[oklch(0.16_0_0)] readout text-sm"
+                className="h-9 rounded-md border border-border bg-well px-2.5 readout text-[13px] focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-ring/40"
               >
                 <option>433.920 MHz</option>
                 <option>868.100 MHz</option>
                 <option>915.000 MHz</option>
                 <option>2.4 GHz</option>
               </select>
-            </div>
+            </label>
             <div className="flex flex-col gap-1.5">
-              <label className="label-mono text-[10px]">Playback Speed</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(["1x", "2x", "5x"] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setSimSpeed(s)}
-                    className="panel px-2 py-1.5 label-mono text-[10px] hover:bg-[oklch(0.21_0_0)]"
-                    style={{
-                      borderColor: simSpeed === s ? "var(--foreground)" : undefined,
-                      color: simSpeed === s ? "var(--foreground)" : undefined,
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              <span className="eyebrow">Playback speed</span>
+              <Segmented
+                options={[
+                  { id: "1x", label: "1×" },
+                  { id: "2x", label: "2×" },
+                  { id: "5x", label: "5×" },
+                ]}
+                value={simSpeed}
+                onChange={setSimSpeed}
+                className="w-full [&>button]:flex-1"
+              />
             </div>
-            <div className="grid grid-cols-2 gap-1.5 mt-auto">
-              <button
-                onClick={() => pushCommand("SYS", "PLAYBACK_START")}
-                className="panel px-2 py-1.5 label-mono text-[10px] hover:bg-[oklch(0.21_0_0)]"
-              >
-                Start
-              </button>
-              <button
-                onClick={() => pushCommand("SYS", "PLAYBACK_PAUSE")}
-                className="panel px-2 py-1.5 label-mono text-[10px] hover:bg-[oklch(0.21_0_0)]"
-              >
-                Pause
-              </button>
+            <div className="grid grid-cols-2 gap-2 mt-auto">
+              <Button size="md" onClick={() => pushCommand("SYS", "PLAYBACK_START")}>
+                <Play className="h-3.5 w-3.5" /> Start
+              </Button>
+              <Button size="md" onClick={() => pushCommand("SYS", "PLAYBACK_PAUSE")}>
+                <Pause className="h-3.5 w-3.5" /> Pause
+              </Button>
             </div>
-          </div>
+          </Panel>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -321,9 +381,11 @@ function GroundStation() {
         </div>
       </main>
 
-      <footer className="border-t border-border px-5 py-2 flex items-center justify-between text-xs">
-        <span className="label-mono text-[10px]">Rocket Ground Station v1.0 · Simulated Telemetry</span>
-        <span className="label-mono text-[10px]">© CanSat Team 2026</span>
+      <footer className="border-t border-border">
+        <div className="mx-auto max-w-[1920px] px-6 h-10 flex items-center justify-between text-[11px] text-subtle">
+          <span>Rocket Ground Station v1.0 · Simulated telemetry</span>
+          <span>© CanSat Team 2026</span>
+        </div>
       </footer>
     </div>
   );

@@ -1,4 +1,5 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Panel, StatusPill, TONE_COLOR } from "./ui";
 
 export type AlertType =
   | "COMMUNICATION LOST"
@@ -30,73 +31,78 @@ type Props = {
 };
 
 export function AlertsPanel({ active, history }: Props) {
+  const critical = active.some((a) => a.level === "danger");
   return (
-    <div className="panel p-3 flex flex-col gap-2 h-full min-h-[220px]">
-      <div className="flex items-center justify-between">
-        <span className="label-mono">Mission Alerts</span>
-        <span
-          className="label-mono text-[10px]"
-          style={{ color: active.length ? "var(--warn)" : "var(--ok)" }}
-        >
-          {active.length} active
-        </span>
-      </div>
-
-      <div className="flex flex-col gap-1">
+    <Panel
+      title="Mission alerts"
+      meta={`${history.length} logged`}
+      actions={
+        <StatusPill tone={critical ? "danger" : active.length ? "warn" : "ok"}>
+          {active.length ? `${active.length} active` : "Clear"}
+        </StatusPill>
+      }
+      className="h-full min-h-[300px]"
+      bodyClassName="flex flex-col gap-3"
+    >
+      <div className="flex flex-col gap-1.5">
         {active.length === 0 ? (
-          <div className="rounded-md border border-border bg-[oklch(0.16_0_0)] px-2 py-2 label-mono text-[10px]" style={{ color: "var(--ok)" }}>
-            No active alerts · all conditions nominal
+          <div className="well flex items-center gap-2 px-3 py-2.5 text-xs text-muted-foreground">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" style={{ color: TONE_COLOR.ok }} />
+            No active alerts — all monitored conditions nominal
           </div>
         ) : (
           active.map((a) => {
-            const color = a.level === "danger" ? "var(--destructive)" : "var(--warn)";
+            const color = a.level === "danger" ? TONE_COLOR.danger : TONE_COLOR.warn;
             return (
               <div
                 key={`${a.type}-${a.source}`}
-                className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+                className="flex items-center gap-2.5 rounded-md border border-l-2 px-3 py-2"
                 style={{
-                  borderColor: color,
-                  background:
-                    a.level === "danger"
-                      ? "oklch(0.28 0.1 25 / 0.28)"
-                      : "oklch(0.3 0.09 85 / 0.22)",
+                  borderColor: `color-mix(in oklch, ${color} 30%, transparent)`,
+                  borderLeftColor: color,
+                  background: `color-mix(in oklch, ${color} 7%, transparent)`,
                 }}
               >
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0" style={{ color }} />
-                <span className="label-mono text-[10px] flex-1 truncate" style={{ color }}>
+                <span className="text-xs font-semibold flex-1 truncate" style={{ color }}>
                   {a.type}
-                  {a.detail ? <span className="opacity-70"> · {a.detail}</span> : null}
+                  {a.detail ? (
+                    <span className="readout font-normal text-muted-foreground"> · {a.detail}</span>
+                  ) : null}
                 </span>
-                <span className="label-mono text-[9px] opacity-70">{a.source}</span>
-                <span className="readout text-[10px] text-muted-foreground">{a.since}</span>
+                <span className="text-[11px] text-subtle">{a.source}</span>
+                <span className="readout text-[11px] text-muted-foreground">{a.since}</span>
               </div>
             );
           })
         )}
       </div>
 
-      <div className="mt-1 flex-1 min-h-[70px] flex flex-col gap-1">
-        <span className="label-mono text-[9px] opacity-60">Alert History</span>
-        <div className="flex-1 overflow-auto rounded-md bg-[oklch(0.14_0_0)] border border-border p-2 font-mono text-[10px] space-y-0.5">
+      <div className="flex-1 min-h-[90px] flex flex-col gap-1.5">
+        <span className="eyebrow">History</span>
+        <div className="well flex-1 min-h-[180px] max-h-[260px] overflow-auto scroll-quiet px-3 py-2 font-mono text-[11px] space-y-1">
           {history.length === 0 ? (
-            <div className="text-muted-foreground">No alerts recorded.</div>
+            <div className="text-subtle font-sans text-xs">No alerts recorded.</div>
           ) : (
-            history.map((h) => (
-              <div key={h.id} className="flex items-center gap-2">
-                <span className="text-muted-foreground">{h.time}</span>
-                <span
-                  style={{ color: h.action === "RAISED" ? "var(--warn)" : "var(--ok)" }}
-                  className="w-[52px]"
-                >
-                  {h.action}
-                </span>
-                <span className="flex-1 truncate">{h.type}</span>
-                <span className="opacity-60">{h.source}</span>
-              </div>
-            ))
+            history
+              .slice()
+              .reverse()
+              .map((h) => (
+                <div key={h.id} className="flex items-center gap-3">
+                  <span className="text-subtle">{h.time}</span>
+                  <span
+                    className="w-[60px]"
+                    style={{ color: h.action === "RAISED" ? TONE_COLOR.warn : TONE_COLOR.ok }}
+                  >
+                    {h.action}
+                  </span>
+                  <span className="flex-1 truncate text-muted-foreground">{h.type}</span>
+                  <span className="text-subtle">{h.source}</span>
+                </div>
+              ))
           )}
         </div>
       </div>
-    </div>
+    </Panel>
   );
 }

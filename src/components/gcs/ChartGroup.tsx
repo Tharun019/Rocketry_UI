@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Pause, Play, RotateCcw, ZoomIn } from "lucide-react";
 import { MiniChart } from "./MiniChart";
 import type { Sample } from "./telemetry";
+import { Button, Panel, StatusPill } from "./ui";
+import { cn } from "@/lib/utils";
 
 export type ChartSeries = {
   key: string;
@@ -21,7 +23,7 @@ type Props = {
 const MIN_WINDOW = 10;
 const MAX_WINDOW = 120;
 
-export function ChartGroup({ title, series, accent, columns = "grid-cols-2 md:grid-cols-4" }: Props) {
+export function ChartGroup({ title, series, columns = "grid-cols-2 md:grid-cols-4" }: Props) {
   const [paused, setPaused] = useState(false);
   const [windowSize, setWindowSize] = useState(60);
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
@@ -65,48 +67,50 @@ export function ChartGroup({ title, series, accent, columns = "grid-cols-2 md:gr
   const lastT = source[0]?.data.at(-1)?.t ?? 0;
 
   return (
-    <div className="panel p-3 flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="label-mono">{title}</span>
-          <span className="label-mono text-[9px] opacity-50 flex items-center gap-1">
-            <ZoomIn className="h-3 w-3" /> {windowSize} samples · scroll to zoom
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setPaused((p) => !p)}
-            className="panel px-2 py-1 label-mono text-[10px] flex items-center gap-1 hover:bg-[oklch(0.21_0_0)]"
-            style={{ color: paused ? "var(--warn)" : undefined }}
-          >
+    <Panel
+      title={title}
+      meta={
+        <span className="inline-flex items-center gap-1">
+          <ZoomIn className="h-3 w-3" /> {windowSize} samples · scroll to zoom
+        </span>
+      }
+      actions={
+        <>
+          {paused ? (
+            <StatusPill tone="warn" className="mr-1">
+              Frozen
+            </StatusPill>
+          ) : null}
+          <Button onClick={() => setPaused((p) => !p)} active={paused}>
             {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
             {paused ? "Resume" : "Pause"}
-          </button>
-          <button
-            onClick={() => setClearAt(lastT)}
-            className="panel px-2 py-1 label-mono text-[10px] flex items-center gap-1 hover:bg-[oklch(0.21_0_0)]"
-          >
+          </Button>
+          <Button variant="ghost" onClick={() => setClearAt(lastT)}>
             <RotateCcw className="h-3 w-3" /> Clear
-          </button>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-x-3 gap-y-1">
+          </Button>
+        </>
+      }
+      bodyClassName="flex flex-col gap-3"
+    >
+      <div className="flex flex-wrap gap-1.5">
         {source.map((s) => {
           const on = !hidden[s.key];
           return (
             <button
               key={s.key}
+              type="button"
+              aria-pressed={on}
               onClick={() => setHidden((h) => ({ ...h, [s.key]: on }))}
-              className="flex items-center gap-1.5 label-mono text-[9px]"
-              style={{ opacity: on ? 1 : 0.4 }}
+              className={cn(
+                "inline-flex items-center gap-1.5 h-6 px-2 rounded-md border text-[11px] font-medium transition-colors",
+                on
+                  ? "border-border bg-well text-foreground hover:border-border-strong"
+                  : "border-transparent text-subtle hover:text-muted-foreground",
+              )}
             >
               <span
-                className="h-2.5 w-2.5 rounded-[3px] border"
-                style={{
-                  background: on ? s.color : "transparent",
-                  borderColor: s.color,
-                }}
+                className="h-2 w-2 rounded-[2px] border"
+                style={{ background: on ? s.color : "transparent", borderColor: s.color }}
               />
               {s.label}
             </button>
@@ -114,9 +118,13 @@ export function ChartGroup({ title, series, accent, columns = "grid-cols-2 md:gr
         })}
       </div>
 
-      <div ref={containerRef} className={`grid ${columns} gap-2 auto-rows-[110px]`} style={{ touchAction: "none" }}>
+      <div
+        ref={containerRef}
+        className={`grid ${columns} gap-3 auto-rows-[112px]`}
+        style={{ touchAction: "none" }}
+      >
         {visible.length === 0 ? (
-          <div className="col-span-full h-[110px] flex items-center justify-center label-mono text-[10px] opacity-50">
+          <div className="col-span-full well h-[112px] flex items-center justify-center text-xs text-subtle">
             No series selected
           </div>
         ) : (
@@ -125,12 +133,6 @@ export function ChartGroup({ title, series, accent, columns = "grid-cols-2 md:gr
           ))
         )}
       </div>
-
-      {paused ? (
-        <span className="label-mono text-[9px]" style={{ color: accent }}>
-          Feed paused — display frozen
-        </span>
-      ) : null}
-    </div>
+    </Panel>
   );
 }

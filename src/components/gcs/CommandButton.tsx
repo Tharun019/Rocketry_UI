@@ -1,4 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronRight, ShieldAlert } from "lucide-react";
+import { Button, StatusPill, type Tone } from "./ui";
 
 export type CmdStage = "IDLE" | "SENT" | "ACK" | "NAK" | "PASS" | "FAIL";
 
@@ -11,71 +13,61 @@ export type CommandSpec = {
   note?: string;
 };
 
-const STAGE_LABEL: Record<CmdStage, string> = {
-  IDLE: "",
-  SENT: "COMMAND SENT",
-  ACK: "ACK",
-  NAK: "NAK",
-  PASS: "EXEC PASS",
-  FAIL: "EXEC FAIL",
+const STAGE: Record<Exclude<CmdStage, "IDLE">, { label: string; tone: Tone }> = {
+  SENT: { label: "Sent", tone: "warn" },
+  ACK: { label: "ACK", tone: "ok" },
+  NAK: { label: "NAK", tone: "danger" },
+  PASS: { label: "Pass", tone: "ok" },
+  FAIL: { label: "Fail", tone: "danger" },
 };
-
-function stageColor(stage: CmdStage) {
-  if (stage === "SENT") return "var(--warn)";
-  if (stage === "ACK" || stage === "PASS") return "var(--ok)";
-  if (stage === "NAK" || stage === "FAIL") return "var(--destructive)";
-  return undefined;
-}
 
 export function CommandButton({
   label,
-  accent,
   onClick,
   variant = "default",
   stage = "IDLE",
   note,
 }: {
   label: string;
-  accent: string;
+  accent?: string;
   onClick?: () => void;
-  variant?: "default" | "danger" | "solid";
+  variant?: "default" | "danger";
   stage?: CmdStage;
   note?: string;
 }) {
-  const isDanger = variant === "danger";
-  const isSolid = variant === "solid";
-  const sc = stageColor(stage);
+  const danger = variant === "danger";
   return (
     <button
+      type="button"
       onClick={onClick}
       title={note}
-      className="group panel px-2.5 py-2 text-left transition-colors hover:bg-[oklch(0.21_0_0)] active:scale-[0.99]"
-      style={{
-        borderColor: sc ?? (isDanger ? "oklch(0.55 0.2 25)" : undefined),
-        background: isSolid ? accent : undefined,
-      }}
+      className={[
+        "group w-full rounded-md border px-3 py-2 text-left transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        danger
+          ? "border-destructive/40 bg-destructive/5 hover:bg-destructive/10"
+          : "border-border bg-well hover:bg-hover hover:border-border-strong",
+      ].join(" ")}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-h-6">
+        {danger ? <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-destructive" /> : null}
         <span
-          className="h-1.5 w-1.5 rounded-full shrink-0"
-          style={{
-            background:
-              sc ?? (isDanger ? "oklch(0.68 0.22 25)" : isSolid ? "oklch(0.145 0 0)" : accent),
-          }}
-        />
-        <span
-          className="label-mono text-[10px] truncate"
-          style={{ color: isSolid ? "oklch(0.145 0 0)" : undefined }}
+          className={[
+            "font-mono text-[11.5px] font-medium truncate flex-1",
+            danger ? "text-destructive" : "text-foreground",
+          ].join(" ")}
         >
           {label}
         </span>
+        {stage !== "IDLE" ? (
+          <StatusPill tone={STAGE[stage].tone} className="h-5 px-1.5 text-[10px]">
+            {STAGE[stage].label}
+          </StatusPill>
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-subtle opacity-0 group-hover:opacity-100 transition-opacity" />
+        )}
       </div>
-      <div
-        className="label-mono text-[8.5px] mt-0.5 h-[10px] truncate"
-        style={{ color: sc, opacity: stage === "IDLE" ? 0.45 : 1 }}
-      >
-        {stage === "IDLE" ? (note ?? "") : STAGE_LABEL[stage]}
-      </div>
+      {note ? <div className="mt-0.5 text-[11px] text-subtle truncate">{note}</div> : null}
     </button>
   );
 }
@@ -95,6 +87,13 @@ export function CommandGrid({
   const [stages, setStages] = useState<Record<string, CmdStage>>({});
   const [confirming, setConfirming] = useState<CommandSpec | null>(null);
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  useEffect(() => {
+    if (!confirming) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setConfirming(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirming]);
 
   const fire = (spec: CommandSpec) => {
     onSend(spec.name, (stage) => {
@@ -126,35 +125,48 @@ export function CommandGrid({
       </div>
 
       {confirming ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="panel p-4 max-w-sm w-full flex flex-col gap-3 bg-[oklch(0.17_0_0)]">
-            <span className="label-mono" style={{ color: "var(--warn)" }}>
-              Confirm Command
-            </span>
-            <div className="readout text-sm">{confirming.name}</div>
-            {confirming.note ? (
-              <div className="label-mono text-[10px] opacity-70">{confirming.note}</div>
-            ) : null}
-            <p className="text-sm text-muted-foreground">
-              Are you sure? This command actuates flight hardware and cannot be undone.
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setConfirming(null)}
-                className="panel px-2 py-2 label-mono text-[10px] hover:bg-[oklch(0.21_0_0)]"
-              >
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setConfirming(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="panel w-full max-w-md bg-popover"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2.5 px-5 pt-5">
+              <div className="h-8 w-8 rounded-full bg-destructive/12 flex items-center justify-center">
+                <ShieldAlert className="h-4 w-4 text-destructive" />
+              </div>
+              <h3 className="text-[15px] font-semibold">Confirm command</h3>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-3">
+              <div className="well px-3 py-2.5">
+                <div className="font-mono text-[13px]">{confirming.name}</div>
+                {confirming.note ? (
+                  <div className="mt-0.5 text-xs text-subtle">{confirming.note}</div>
+                ) : null}
+              </div>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                This command actuates flight hardware and cannot be undone. Make sure the vehicle is
+                within the valid window before sending.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 px-5 pb-5">
+              <Button size="md" autoFocus onClick={() => setConfirming(null)}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                size="md"
+                variant="danger-solid"
                 onClick={() => {
                   fire(confirming);
                   setConfirming(null);
                 }}
-                className="panel px-2 py-2 label-mono text-[10px]"
-                style={{ borderColor: "var(--destructive)", color: "var(--destructive)" }}
               >
-                Confirm & Send
-              </button>
+                Send command
+              </Button>
             </div>
           </div>
         </div>
