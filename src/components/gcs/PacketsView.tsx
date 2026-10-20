@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, ListOrdered, Pause, Play } from "lucide-react";
 import {
   GROUND_FIELDS,
@@ -50,7 +50,14 @@ export function PacketsView({ log, stats, teamId, onTeamIdChange }: Props) {
   const [frozenAt, setFrozenAt] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
 
-  const now = stats.lastRxAt || Date.now();
+  // Re-render every second so "last packet" age and rate keep moving when packets stop.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const now = Date.now();
   const end = frozenAt ?? log.length;
 
   const rows = useMemo(() => {
@@ -63,16 +70,14 @@ export function PacketsView({ log, stats, teamId, onTeamIdChange }: Props) {
     // stats.received changes on every packet; the log array itself is mutated in place.
   }, [log, end, filter, stats.received]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const rateHz = useMemo(() => {
-    let n = 0;
-    for (let i = log.length - 1; i >= 0 && log[i].rxAt > now - 5000; i--) n++;
-    return n / 5;
-  }, [log, now]);
+  let recent = 0;
+  for (let i = log.length - 1; i >= 0 && log[i].rxAt > now - 5000; i--) recent++;
+  const rateHz = recent / 5;
 
   const inspected = selected !== null ? log[selected - 1] : log[end - 1];
   const sent = stats.valid + stats.missed;
   const lossPct = sent > 0 ? (stats.missed / sent) * 100 : 0;
-  const ageS = stats.lastRxAt ? (Date.now() - stats.lastRxAt) / 1000 : null;
+  const ageS = stats.lastRxAt ? (now - stats.lastRxAt) / 1000 : null;
   const placeholderId = teamId === TEAM_ID_PLACEHOLDER || teamId.endsWith("XXX") || !teamId;
 
   return (
