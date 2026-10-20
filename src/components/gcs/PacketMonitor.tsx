@@ -19,8 +19,9 @@ const STATUS_TONE: Record<LinkStatus, Tone> = {
 };
 
 export function PacketMonitor({ tx, rx, loss, snr, lastPacket, rateHz, status }: Props) {
-  const total = tx + rx;
-  const lossPct = total > 0 ? (loss / total) * 100 : 0;
+  // Loss = downlink packets the on-board counter says were sent but never arrived.
+  const sent = rx + loss;
+  const lossPct = sent > 0 ? (loss / sent) * 100 : 0;
   const integrity = Math.max(0, 100 - lossPct * 4);
   const integrityTone: Tone = integrity >= 90 ? "ok" : integrity >= 75 ? "warn" : "danger";
 
@@ -33,7 +34,7 @@ export function PacketMonitor({ tx, rx, loss, snr, lastPacket, rateHz, status }:
       bodyClassName="flex flex-col gap-3"
     >
       <div className="grid grid-cols-3 gap-2">
-        <Stat label="TX" value={tx.toLocaleString()} size="lg" />
+        <Stat label="TX cmds" value={tx.toLocaleString()} size="lg" />
         <Stat label="RX" value={rx.toLocaleString()} size="lg" />
         <Stat
           label="Loss"

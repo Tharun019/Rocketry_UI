@@ -181,3 +181,40 @@ export function Stat({
     </div>
   );
 }
+
+/** Top-level page tabs. */
+export function TabBar<T extends string>({
+  tabs,
+  value,
+  onChange,
+}: {
+  tabs: { id: T; label: string; badge?: ReactNode }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div role="tablist" className="flex items-end gap-1 border-b border-border">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={value === t.id}
+          onClick={() => onChange(t.id)}
+          className={cn(
+            "relative -mb-px inline-flex items-center gap-2 h-9 px-3 text-[13px] font-medium border-b-2 transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 rounded-t-md",
+            value === t.id
+              ? "border-[var(--rocket)] text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {t.label}
+          {t.badge !== undefined ? (
+            <span className="readout text-[11px] text-subtle">{t.badge}</span>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  );
+}

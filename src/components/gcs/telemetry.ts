@@ -54,6 +54,8 @@ const WIND = { toBearing: 65, speed: 6 };
 /** Launch rail tilt off vertical (deg). */
 const RAIL_TILT = 4;
 const TRACK_MAX = 20000; // ~66 min at 5 Hz
+/** Launch site height above mean sea level (m), used for the simulated GNSS altitude. */
+const SITE_MSL = 100;
 
 export type RocketFrame = {
   state: FlightState;
@@ -71,6 +73,17 @@ export type RocketFrame = {
   lastPacketAt: number;
   updateRate: number;
   gpsValid: boolean;
+  /** On-board packet counter; a jump of more than 1 means packets were lost in the air. */
+  packetCount: number;
+  /** GNSS receiver time, UTC seconds of day. */
+  gnssTime: number;
+  /** GNSS altitude above mean sea level (m). */
+  gnssAlt: number;
+  gnssSats: number;
+  /** Attitude (deg). */
+  roll: number;
+  pitch: number;
+  yaw: number;
   lat: number;
   lon: number;
   path: LatLon[];
@@ -119,6 +132,13 @@ function initialFrame(site: LaunchSite): RocketFrame {
     lastPacketAt: 0,
     updateRate: 5,
     gpsValid: true,
+    packetCount: 0,
+    gnssTime: 0,
+    gnssAlt: SITE_MSL,
+    gnssSats: 10,
+    roll: 0,
+    pitch: 0,
+    yaw: 0,
     lat: site.lat,
     lon: site.lon,
     path: [[site.lat, site.lon]],
@@ -227,6 +247,9 @@ export function useTelemetry(site: LaunchSite) {
         }
 
         const battery = Math.max(10.8, r.battery - 0.0008);
+        const gpsValid = Math.random() > 0.02;
+        // ~1.5% of packets never reach the ground station.
+        const packetCount = r.packetCount + (Math.random() < 0.015 ? 2 : 1);
 
         return {
           ...r,
@@ -244,7 +267,14 @@ export function useTelemetry(site: LaunchSite) {
           linkQuality: Math.max(60, Math.min(100, r.linkQuality + (Math.random() - 0.5) * 4)),
           lastPacketAt: now,
           updateRate: 4.6 + Math.random() * 0.8,
-          gpsValid: Math.random() > 0.02,
+          gpsValid,
+          packetCount,
+          gnssTime: Math.floor((now % 86_400_000) / 1000),
+          gnssAlt: SITE_MSL + alt + (Math.random() - 0.5) * 3,
+          gnssSats: gpsValid ? 8 + Math.round(Math.random() * 4) : 3,
+          roll: gyro[0] * 0.5,
+          pitch: gyro[1] * 0.5,
+          yaw: gyro[2] * 0.5,
           lat,
           lon,
           path,

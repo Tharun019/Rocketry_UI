@@ -4,6 +4,8 @@ import { Header, type MissionEvent, type SystemStatus } from "@/components/gcs/H
 import { RocketDashboard } from "@/components/gcs/RocketDashboard";
 import { AttitudeIndicator } from "@/components/gcs/AttitudeIndicator";
 import { PacketMonitor } from "@/components/gcs/PacketMonitor";
+import { PacketsView } from "@/components/gcs/PacketsView";
+import { simulateDownlink, usePacketLog, useTeamId } from "@/components/gcs/packets";
 import { TrajectoryPanel } from "@/components/gcs/TrajectoryPanel";
 import {
   AlertsPanel,
@@ -17,7 +19,7 @@ import { ROCKET_STATES, ROCKET_STATE_ALIASES, useTelemetry } from "@/components/
 import { useLaunchSite } from "@/components/gcs/site";
 import type { Marker3D } from "@/components/gcs/Trajectory3D";
 import { StateTimeline } from "@/components/gcs/StateTimeline";
-import { Button, Panel, Segmented } from "@/components/gcs/ui";
+import { Button, Panel, Segmented, TabBar } from "@/components/gcs/ui";
 import { Pause, Play } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -54,17 +56,17 @@ function GroundStation() {
   const [simSpeed, setSimSpeed] = useState<"1x" | "2x" | "5x">("1x");
   const [rfChannel, setRfChannel] = useState("433.920 MHz");
 
-  const [packets, setPackets] = useState({ tx: 0, rx: 0, loss: 0 });
+  const [tab, setTab] = useState<"flight" | "packets">("flight");
+
+  // ---- Downlink packets --------------------------------------------------
+  // Every telemetry frame arrives as one ASCII packet line; it is parsed and
+  // logged like a real receiver would, independent of which tab is open.
+  const { teamId, setTeamId } = useTeamId();
+  const { log: packetLog, stats: packetStats, ingest } = usePacketLog();
   useEffect(() => {
-    const id = setInterval(() => {
-      setPackets((p) => ({
-        tx: p.tx + 3,
-        rx: p.rx + 5,
-        loss: p.loss + (Math.random() < 0.1 ? 1 : 0),
-      }));
-    }, 500);
-    return () => clearInterval(id);
-  }, []);
+    if (rocket.packetCount === 0) return;
+    ingest(simulateDownlink(rocket, teamId), { rssi: rocket.rssi, snr: rocket.snr }, teamId);
+  }, [rocket.packetCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Mission event log -------------------------------------------------
   const [events, setEvents] = useState<MissionEvent[]>([]);
@@ -287,97 +289,126 @@ function GroundStation() {
       />
 
       <main className="flex-1 w-full mx-auto max-w-[1920px] px-6 py-5 flex flex-col gap-4">
-        <RocketDashboard
-          data={rocket}
-          onCommand={(c, onStage) => pushCommand("ROCKET", c, onStage)}
+        <TabBar
+          tabs={[
+            { id: "flight", label: "Flight" },
+            {
+              id: "packets",
+              label: "Packets",
+              badge: packetStats.received.toLocaleString(),
+            },
+          ]}
+          value={tab}
+          onChange={setTab}
         />
 
-        <TrajectoryPanel
-          label="Flight path"
-          accent="var(--rocket)"
-          track={rocket.track}
-          markers={flightMarkers}
-          site={site}
-          onSiteChange={setSite}
-          onSiteReset={resetSite}
-          velocityNow={rocket.velocity}
-          altitude={rocket.charts.altitude}
-          velocity={rocket.charts.velocity}
-          altitudeColor="var(--rocket)"
-          velocityColor="oklch(0.9 0 0)"
-          timeline={
-            <StateTimeline
-              states={ROCKET_STATES}
-              current={rocket.state}
-              accent="var(--rocket)"
-              aliases={ROCKET_STATE_ALIASES}
-            />
-          }
-        />
+        {tab === "packets" ? (
+          <PacketsView
+            log={packetLog}
+            stats={packetStats}
+            teamId={teamId}
+            onTeamIdChange={setTeamId}
+          />
+        ) : null}
 
-        <div className="grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1fr)] gap-4">
-          <AttitudeIndicator
-            label="Rocket"
+        {/* Kept mounted while hidden so the 3D view and charts keep their state. */}
+        <div className={tab === "flight" ? "flex flex-col gap-4" : "hidden"}>
+          <RocketDashboard
+            data={rocket}
+            onCommand={(c, onStage) => pushCommand("ROCKET", c, onStage)}
+          />
+
+          <TrajectoryPanel
+            label="Flight path"
             accent="var(--rocket)"
-            pitch={rocket.gyro[1] * 0.5}
-            roll={rocket.gyro[0] * 0.5}
-            yaw={rocket.gyro[2] * 0.5}
-          />
-          <PacketMonitor
-            tx={packets.tx}
-            rx={packets.rx}
-            loss={packets.loss}
-            snr={rocket.snr}
-            lastPacket={stamp()}
-            rateHz={rocket.updateRate}
-            status={linkStatus(rocket.linkQuality, rocket.lastPacketAt)}
-          />
-          <Panel
-            title="Radio & playback"
-            meta="Ground station"
-            className="md:col-span-2 xl:col-span-1"
-            bodyClassName="flex flex-col gap-4"
-          >
-            <label className="flex flex-col gap-1.5">
-              <span className="eyebrow">Frequency</span>
-              <select
-                value={rfChannel}
-                onChange={(e) => setRfChannel(e.target.value)}
-                className="h-9 rounded-md border border-border bg-well px-2.5 readout text-[13px] focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-ring/40"
-              >
-                <option>433.920 MHz</option>
-                <option>868.100 MHz</option>
-                <option>915.000 MHz</option>
-                <option>2.4 GHz</option>
-              </select>
-            </label>
-            <div className="flex flex-col gap-1.5">
-              <span className="eyebrow">Playback speed</span>
-              <Segmented
-                options={[
-                  { id: "1x", label: "1×" },
-                  { id: "2x", label: "2×" },
-                  { id: "5x", label: "5×" },
-                ]}
-                value={simSpeed}
-                onChange={setSimSpeed}
-                className="w-full [&>button]:flex-1"
+            track={rocket.track}
+            markers={flightMarkers}
+            site={site}
+            onSiteChange={setSite}
+            onSiteReset={resetSite}
+            velocityNow={rocket.velocity}
+            altitude={rocket.charts.altitude}
+            velocity={rocket.charts.velocity}
+            altitudeColor="var(--rocket)"
+            velocityColor="oklch(0.9 0 0)"
+            timeline={
+              <StateTimeline
+                states={ROCKET_STATES}
+                current={rocket.state}
+                accent="var(--rocket)"
+                aliases={ROCKET_STATE_ALIASES}
               />
-            </div>
-            <div className="grid grid-cols-2 gap-2 mt-auto">
-              <Button size="md" onClick={() => pushCommand("SYS", "PLAYBACK_START")}>
-                <Play className="h-3.5 w-3.5" /> Start
-              </Button>
-              <Button size="md" onClick={() => pushCommand("SYS", "PLAYBACK_PAUSE")}>
-                <Pause className="h-3.5 w-3.5" /> Pause
-              </Button>
-            </div>
-          </Panel>
-        </div>
+            }
+          />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <AlertsPanel active={activeAlerts} history={alertHistory} />
-          <CommandConsole entries={entries} />
+          <div className="grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1fr)] gap-4">
+            <AttitudeIndicator
+              label="Rocket"
+              accent="var(--rocket)"
+              pitch={rocket.pitch}
+              roll={rocket.roll}
+              yaw={rocket.yaw}
+            />
+            <PacketMonitor
+              tx={entries.length}
+              rx={packetStats.valid}
+              loss={packetStats.missed}
+              snr={rocket.snr}
+              lastPacket={
+                packetStats.lastRxAt
+                  ? new Date(packetStats.lastRxAt).toISOString().slice(11, 19)
+                  : "—"
+              }
+              rateHz={rocket.updateRate}
+              status={linkStatus(rocket.linkQuality, rocket.lastPacketAt)}
+            />
+            <Panel
+              title="Radio & playback"
+              meta="Ground station"
+              className="md:col-span-2 xl:col-span-1"
+              bodyClassName="flex flex-col gap-4"
+            >
+              <label className="flex flex-col gap-1.5">
+                <span className="eyebrow">Frequency</span>
+                <select
+                  value={rfChannel}
+                  onChange={(e) => setRfChannel(e.target.value)}
+                  className="h-9 rounded-md border border-border bg-well px-2.5 readout text-[13px] focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-ring/40"
+                >
+                  <option>433.920 MHz</option>
+                  <option>868.100 MHz</option>
+                  <option>915.000 MHz</option>
+                  <option>2.4 GHz</option>
+                </select>
+              </label>
+              <div className="flex flex-col gap-1.5">
+                <span className="eyebrow">Playback speed</span>
+                <Segmented
+                  options={[
+                    { id: "1x", label: "1×" },
+                    { id: "2x", label: "2×" },
+                    { id: "5x", label: "5×" },
+                  ]}
+                  value={simSpeed}
+                  onChange={setSimSpeed}
+                  className="w-full [&>button]:flex-1"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-auto">
+                <Button size="md" onClick={() => pushCommand("SYS", "PLAYBACK_START")}>
+                  <Play className="h-3.5 w-3.5" /> Start
+                </Button>
+                <Button size="md" onClick={() => pushCommand("SYS", "PLAYBACK_PAUSE")}>
+                  <Pause className="h-3.5 w-3.5" /> Pause
+                </Button>
+              </div>
+            </Panel>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <AlertsPanel active={activeAlerts} history={alertHistory} />
+            <CommandConsole entries={entries} />
+          </div>
         </div>
       </main>
 
