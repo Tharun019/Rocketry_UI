@@ -64,8 +64,6 @@ export type CameraMode = "AUTO" | "FOLLOW";
 /** Altitude reference line drawn in red (m AGL). */
 export const REF_ALT_M = 1000;
 export const REF_COLOR = "#ff3b3b";
-/** Bearing of the 3D reference bar: square to the default camera heading (-25°). */
-const REF_BAR_BEARING = 65;
 
 /** Wheel zoom limits: camera distance from the trajectory focus point, metres. */
 const MIN_RANGE = 40;
@@ -348,9 +346,8 @@ export function Trajectory3D({
     viewer.scene.requestRender();
   }, [status, site.lat, site.lon, ringM]);
 
-  // ---- 1000 m altitude reference bar (black) -----------------------------
-  // A line across the launch axis, as long as the old ring's diameter, square to the
-  // default camera heading so the track reads as above or below it.
+  // ---- 1000 m altitude reference ring (red) -----------------------------
+  // Sized to enclose the flight's ground footprint; only rebuilt when that grows.
   const refRadius = useMemo(() => {
     const far = track.reduce((m, p) => Math.max(m, distanceBearing(site, p).dist), 0);
     return Math.max(200, Math.ceil((far * 1.3) / 100) * 100);
@@ -361,28 +358,42 @@ export function Trajectory3D({
     const Cesium = window.Cesium;
     if (status !== "ready" || !viewer || !Cesium) return;
     refEnts.current.forEach((e) => viewer.entities.remove(e));
-    const a = (REF_BAR_BEARING * Math.PI) / 180;
-    const tag = offsetToLatLon(site, Math.sin(a) * refRadius, Math.cos(a) * refRadius);
-    const tail = offsetToLatLon(site, -Math.sin(a) * refRadius, -Math.cos(a) * refRadius);
+    const ring: number[] = [];
+    for (let i = 0; i <= 72; i++) {
+      const a = (i / 72) * 2 * Math.PI;
+      const p = offsetToLatLon(site, Math.sin(a) * refRadius, Math.cos(a) * refRadius);
+      ring.push(p.lon, p.lat, REF_ALT_M);
+    }
+    const tag = offsetToLatLon(site, refRadius, 0);
+    const red = Cesium.Color.fromCssColorString(REF_COLOR);
     refEnts.current = [
       viewer.entities.add({
         polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArrayHeights(ring),
+          width: 2.5,
+          arcType: Cesium.ArcType.NONE,
+          material: red,
+        },
+      }),
+      // Dashed spoke from the launch axis to the ring so the level reads against the track.
+      viewer.entities.add({
+        polyline: {
           positions: Cesium.Cartesian3.fromDegreesArrayHeights([
-            tail.lon,
-            tail.lat,
+            site.lon,
+            site.lat,
             REF_ALT_M,
             tag.lon,
             tag.lat,
             REF_ALT_M,
           ]),
-          width: 6,
+          width: 1.5,
           arcType: Cesium.ArcType.NONE,
-          material: Cesium.Color.BLACK,
+          material: new Cesium.PolylineDashMaterialProperty({ color: red.withAlpha(0.8) }),
         },
       }),
       viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(tag.lon, tag.lat, REF_ALT_M),
-        label: labelOpts(Cesium, `${REF_ALT_M} m AGL`, "#ffffff", "right"),
+        label: labelOpts(Cesium, `${REF_ALT_M} m (Reference Apogee)`, REF_COLOR, "right"),
       }),
     ];
     viewer.scene.requestRender();

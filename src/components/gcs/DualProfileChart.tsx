@@ -192,7 +192,7 @@ export function DualProfileChart({ altitude, velocity, altitudeColor, velocityCo
               strokeWidth={1.5}
               ifOverflow="extendDomain"
               label={{
-                value: `${REF_ALT_M} m`,
+                value: `${REF_ALT_M} m (Reference Apogee)`,
                 position: "insideTopLeft",
                 fontSize: 9,
                 fill: REF_COLOR,
