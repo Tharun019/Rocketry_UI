@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Header, type MissionEvent, type SystemStatus } from "@/components/gcs/Header";
 import { RocketDashboard } from "@/components/gcs/RocketDashboard";
-import { AttitudeIndicator } from "@/components/gcs/AttitudeIndicator";
 import { PacketMonitor } from "@/components/gcs/PacketMonitor";
 import { PacketsView } from "@/components/gcs/PacketsView";
 import { simulateDownlink, usePacketLog, useTeamId } from "@/components/gcs/packets";
@@ -75,7 +74,8 @@ function GroundStation() {
     const add = (label: string) => setEvents((e) => [...e, { label, time: stamp() }].slice(-30));
 
     if (prevRocketState.current !== rocket.state) {
-      if (rocket.state === "LIFTOFF") {
+      if (rocket.state === "IMU_CALIBRATE") add("IMU CALIBRATION");
+      else if (rocket.state === "LIFTOFF") {
         add("IGNITION");
         add("LIFT-OFF");
       } else if (rocket.state === "APOGEE") add("APOGEE");
@@ -340,14 +340,7 @@ function GroundStation() {
             }
           />
 
-          <div className="grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1fr)] gap-4">
-            <AttitudeIndicator
-              label="Rocket"
-              accent="var(--rocket)"
-              pitch={rocket.pitch}
-              roll={rocket.roll}
-              yaw={rocket.yaw}
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <PacketMonitor
               tx={entries.length}
               rx={packetStats.valid}
@@ -364,7 +357,6 @@ function GroundStation() {
             <Panel
               title="Radio & playback"
               meta="Ground station"
-              className="md:col-span-2 xl:col-span-1"
               bodyClassName="flex flex-col gap-4"
             >
               <label className="flex flex-col gap-1.5">

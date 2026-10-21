@@ -5,6 +5,7 @@ export type FlightState =
   | "BOOT"
   | "TEST_MODE"
   | "LAUNCH_PAD"
+  | "IMU_CALIBRATE"
   | "LIFTOFF"
   | "ASCENT"
   | "APOGEE"
@@ -16,6 +17,7 @@ export const ROCKET_STATES: FlightState[] = [
   "BOOT",
   "TEST_MODE",
   "LAUNCH_PAD",
+  "IMU_CALIBRATE",
   "LIFTOFF",
   "ASCENT",
   "APOGEE",
@@ -169,13 +171,15 @@ export function useTelemetry(site: LaunchSite) {
 
       setRocket((r) => {
         let state = r.state;
-        if (t > 5 && state === "LAUNCH_PAD") state = "LIFTOFF";
+        if (t > 2 && state === "LAUNCH_PAD") state = "IMU_CALIBRATE";
+        if (t > 5 && state === "IMU_CALIBRATE") state = "LIFTOFF";
         if (t > 8 && state === "LIFTOFF") state = "ASCENT";
         if (t > 25 && state === "ASCENT") state = "APOGEE";
         if (t > 28 && state === "APOGEE") state = "PAYLOAD_SEPARATION";
         if (t > 33 && state === "PAYLOAD_SEPARATION") state = "DESCENT";
         if (t > 90 && state === "DESCENT") state = "IMPACT";
 
+        const onPad = state === "LAUNCH_PAD" || state === "IMU_CALIBRATE";
         let alt = r.altitude;
         let vel = r.velocity;
         if (state === "LIFTOFF" || state === "ASCENT") {
@@ -213,7 +217,7 @@ export function useTelemetry(site: LaunchSite) {
           const h = Math.abs(vel) * Math.sin((RAIL_TILT * Math.PI) / 180) * 0.2;
           east -= Math.sin(windRad) * h;
           north -= Math.cos(windRad) * h;
-        } else if (state !== "LAUNCH_PAD" && state !== "IMPACT" && alt > 0) {
+        } else if (!onPad && state !== "IMPACT" && alt > 0) {
           const gust = WIND.speed * (0.8 + Math.random() * 0.4) * 0.2;
           east += Math.sin(windRad) * gust;
           north += Math.cos(windRad) * gust;
@@ -225,7 +229,7 @@ export function useTelemetry(site: LaunchSite) {
           r.path.length > 160 ? [...r.path.slice(1), [lat, lon]] : [...r.path, [lat, lon]];
 
         const point: TrackPoint = { t, lat, lon, alt };
-        const flying = state !== "LAUNCH_PAD" && !(state === "IMPACT" && r.state === "IMPACT");
+        const flying = !onPad && !(state === "IMPACT" && r.state === "IMPACT");
         const track = flying
           ? r.track.length >= TRACK_MAX
             ? [...r.track.slice(1), point]

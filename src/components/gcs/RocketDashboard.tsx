@@ -108,11 +108,9 @@ export function RocketDashboard({ data, onCommand }: Props) {
             <CommandGrid
               columns="grid-cols-2 xl:grid-cols-1"
               commands={[
-                { name: "TELEMETRY_ENABLE" },
                 { name: "IMU_CALIBRATE" },
                 { name: "LORA_LINK_ON" },
                 { name: "LORA_LINK_OFF" },
-                { name: "PAYLOAD_DEMONSTRATION" },
               ]}
               accent={ACCENT}
               onSend={onCommand}
