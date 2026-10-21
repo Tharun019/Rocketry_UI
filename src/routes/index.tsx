@@ -82,8 +82,7 @@ function GroundStation() {
       else if (rocket.state === "PAYLOAD_SEPARATION") {
         add("DROGUE DEPLOY");
         add("PAYLOAD SEPARATION");
-      } else if (rocket.state === "AEROBRAKE_RELEASE") add("MAIN / AEROBRAKE RELEASE");
-      else if (rocket.state === "IMPACT") add("TOUCHDOWN");
+      } else if (rocket.state === "IMPACT") add("TOUCHDOWN");
       prevRocketState.current = rocket.state;
     }
   }, [rocket.state]);
@@ -219,7 +218,7 @@ function GroundStation() {
   // ---- Derived mission phase / status ------------------------------------
   const missionPhase = useMemo(() => {
     if (rocket.state === "IMPACT") return "ROCKET LANDED";
-    if (rocket.state === "DESCENT" || rocket.state === "AEROBRAKE_RELEASE") return "ROCKET DESCENT";
+    if (rocket.state === "DESCENT") return "ROCKET DESCENT";
     if (rocket.state === "PAYLOAD_SEPARATION") return "PAYLOAD SEPARATION";
     if (rocket.state === "APOGEE") return "APOGEE";
     if (rocket.state === "ASCENT" || rocket.state === "LIFTOFF") return "ASCENT";

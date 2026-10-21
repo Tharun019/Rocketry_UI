@@ -34,7 +34,7 @@ Rocket Dashboard
 
 Include:
 
- Flight State Timeline: BOOT → TEST_MODE → LAUNCH_PAD → ASCENT → PAYLOAD_SEPARATION → DESCENT → AEROBRAKE_RELEASE → IMPACT
+ Flight State Timeline: BOOT → TEST_MODE → LAUNCH_PAD → ASCENT → PAYLOAD_SEPARATION → DESCENT → IMPACT
 
  Live Telemetry Cards:
 

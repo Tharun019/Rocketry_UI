@@ -10,7 +10,6 @@ export type FlightState =
   | "APOGEE"
   | "PAYLOAD_SEPARATION"
   | "DESCENT"
-  | "AEROBRAKE_RELEASE"
   | "IMPACT";
 
 export const ROCKET_STATES: FlightState[] = [
@@ -22,7 +21,6 @@ export const ROCKET_STATES: FlightState[] = [
   "APOGEE",
   "PAYLOAD_SEPARATION",
   "DESCENT",
-  "AEROBRAKE_RELEASE",
   "IMPACT",
 ];
 
@@ -31,7 +29,6 @@ export const ROCKET_STATE_ALIASES: Partial<Record<FlightState, string>> = {
   TEST_MODE: "PRE-LAUNCH",
   LIFTOFF: "LAUNCH",
   PAYLOAD_SEPARATION: "DROGUE",
-  AEROBRAKE_RELEASE: "MAIN",
   IMPACT: "LANDED",
 };
 
@@ -45,7 +42,6 @@ export type RocketMarkers = {
   launch?: TrackPoint;
   apogee?: TrackPoint;
   drogue?: TrackPoint;
-  main?: TrackPoint;
   landing?: TrackPoint;
 };
 
@@ -178,8 +174,7 @@ export function useTelemetry(site: LaunchSite) {
         if (t > 25 && state === "ASCENT") state = "APOGEE";
         if (t > 28 && state === "APOGEE") state = "PAYLOAD_SEPARATION";
         if (t > 33 && state === "PAYLOAD_SEPARATION") state = "DESCENT";
-        if (t > 55 && state === "DESCENT") state = "AEROBRAKE_RELEASE";
-        if (t > 90 && state === "AEROBRAKE_RELEASE") state = "IMPACT";
+        if (t > 90 && state === "DESCENT") state = "IMPACT";
 
         let alt = r.altitude;
         let vel = r.velocity;
@@ -189,7 +184,7 @@ export function useTelemetry(site: LaunchSite) {
         } else if (state === "APOGEE" || state === "PAYLOAD_SEPARATION") {
           vel += (0 - vel) * 0.15;
           alt += vel * 0.2;
-        } else if (state === "DESCENT" || state === "AEROBRAKE_RELEASE") {
+        } else if (state === "DESCENT") {
           vel = Math.max(-40, vel - 2 - Math.random());
           alt = Math.max(0, alt + vel * 0.2);
         } else if (state === "IMPACT") {
@@ -242,7 +237,6 @@ export function useTelemetry(site: LaunchSite) {
         if (state !== r.state) {
           if (state === "APOGEE") markers.apogee = point;
           if (state === "PAYLOAD_SEPARATION") markers.drogue = point;
-          if (state === "AEROBRAKE_RELEASE") markers.main = point;
           if (state === "IMPACT") markers.landing = point;
         }
 
