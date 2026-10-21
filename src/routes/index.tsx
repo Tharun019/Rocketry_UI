@@ -414,7 +414,7 @@ function GroundStation() {
       <footer className="border-t border-border">
         <div className="mx-auto max-w-[1920px] px-6 h-10 flex items-center justify-between text-[11px] text-subtle">
           <span>Rocket Ground Station v1.0 · Simulated telemetry</span>
-          <span>© CanSat Team 2026</span>
+          <span>© Team ROCKETRY-020 · 2026</span>
         </div>
       </footer>
     </div>

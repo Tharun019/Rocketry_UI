@@ -3,7 +3,6 @@ import { Download, ListOrdered, Pause, Play } from "lucide-react";
 import {
   GROUND_FIELDS,
   PACKET_FIELDS,
-  TEAM_ID_PLACEHOLDER,
   buildFlightCsv,
   buildStateSummaryCsv,
   downloadText,
@@ -78,7 +77,7 @@ export function PacketsView({ log, stats, teamId, onTeamIdChange }: Props) {
   const sent = stats.valid + stats.missed;
   const lossPct = sent > 0 ? (stats.missed / sent) * 100 : 0;
   const ageS = stats.lastRxAt ? (now - stats.lastRxAt) / 1000 : null;
-  const placeholderId = teamId === TEAM_ID_PLACEHOLDER || teamId.endsWith("XXX") || !teamId;
+  const placeholderId = teamId.endsWith("XXX") || !teamId;
 
   return (
     <div className="flex flex-col gap-4">
@@ -268,7 +267,7 @@ function ExportPanel({
         />
         {placeholderId ? (
           <span className="text-[11px]" style={{ color: TONE_COLOR.warn }}>
-            Replace XXX with your team number before flight.
+            Enter your team ID before flight.
           </span>
         ) : null}
       </label>

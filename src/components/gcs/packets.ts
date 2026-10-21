@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ROCKET_STATES, type RocketFrame } from "./telemetry";
 
 /**
- * Downlink packet format (IN-SPACe CAN-7USAT telemetry, section 6.3).
+ * Downlink packet format (IN-SPACe Model Rocketry telemetry, section 6.3).
  * The rocket sends one ASCII line per packet, comma-separated, in exactly this
  * order, terminated by CR. Required fields come first, then OPTIONAL_DATA, then
  * the additional fields allowed by 6.3.B.
@@ -225,18 +225,19 @@ export function usePacketLog() {
 
 // ---- Team ID ---------------------------------------------------------------
 
-export const TEAM_ID_PLACEHOLDER = "2026-IN-SPACe-CAN-7USAT-XXX";
+export const DEFAULT_TEAM_ID = "2026-IN-SPACe-ROCKETRY-020";
 const TEAM_KEY = "gcs.teamId";
 
 /** Team ID that survives page reloads (stored in this browser only). */
 export function useTeamId() {
-  const [teamId, setTeamIdState] = useState(TEAM_ID_PLACEHOLDER);
+  const [teamId, setTeamIdState] = useState(DEFAULT_TEAM_ID);
 
   // Read after mount so server render and first client render match.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(TEAM_KEY);
-      if (raw) setTeamIdState(raw);
+      // Skip IDs saved before the switch to the rocketry team ID.
+      if (raw && !/7USAT|XXX$/i.test(raw)) setTeamIdState(raw);
     } catch {
       /* storage unavailable: keep default */
     }
