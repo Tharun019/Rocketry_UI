@@ -8,6 +8,7 @@ import {
   downloadText,
   fieldValue,
   flightFileName,
+  groundCells,
   type IssueKind,
   type PacketRecord,
   type PacketStats,
@@ -354,7 +355,7 @@ function Inspector({
                 const v =
                   i < PACKET_FIELDS.length
                     ? record.values![i]
-                    : [record.rssi.toFixed(0), record.snr.toFixed(1), rxTime(record.rxAt)][
+                    : [...groundCells(record).map((c) => c || "—"), rxTime(record.rxAt)][
                         i - PACKET_FIELDS.length
                       ];
                 return (

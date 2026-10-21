@@ -50,7 +50,7 @@ export const GROUND_FIELDS: PacketField[] = [
   { key: "GS_RECEIVED_UTC", label: "Received (UTC)" },
 ];
 
-const FIELD_INDEX = Object.fromEntries(PACKET_FIELDS.map((f, i) => [f.key, i]));
+export const FIELD_INDEX = Object.fromEntries(PACKET_FIELDS.map((f, i) => [f.key, i]));
 
 /** Encode a frame as the flight computer would transmit it. */
 export function encodePacket(f: RocketFrame, teamId: string, optional = ""): string {
@@ -103,9 +103,12 @@ export type PacketRecord = {
   values: string[] | null;
   count: number | null;
   issues: PacketIssue[];
-  rssi: number;
-  snr: number;
+  /** Measured by the ground receiver; null when the receiver did not report it. */
+  rssi: number | null;
+  snr: number | null;
 };
+
+export type GroundLink = { rssi: number | null; snr: number | null };
 
 export type PacketStats = {
   received: number;
@@ -130,8 +133,29 @@ const EMPTY_STATS: PacketStats = {
   lastRxAt: 0,
 };
 
+/**
+ * A live receiver line is the packet, optionally followed by the ground station's
+ * own RSSI and SNR as two extra fields.
+ */
+export function splitGroundLink(raw: string): { packet: string } & GroundLink {
+  const parts = raw.replace(/[\r\n]+$/, "").split(",");
+  if (parts.length === PACKET_FIELDS.length + 2) {
+    const [rssi, snr] = parts.slice(PACKET_FIELDS.length).map((v) => v.trim());
+    if (rssi !== "" && snr !== "" && Number.isFinite(Number(rssi)) && Number.isFinite(Number(snr)))
+      return {
+        packet: parts.slice(0, PACKET_FIELDS.length).join(","),
+        rssi: Number(rssi),
+        snr: Number(snr),
+      };
+  }
+  return { packet: raw, rssi: null, snr: null };
+}
+
 export function parsePacket(raw: string): { values: string[] } | { error: string } {
-  const values = raw.replace(/[\r\n]+$/, "").split(",");
+  const values = raw
+    .replace(/[\r\n]+$/, "")
+    .split(",")
+    .map((v) => v.trim());
   if (values.length !== PACKET_FIELDS.length)
     return { error: `Expected ${PACKET_FIELDS.length} fields, got ${values.length}` };
   for (let i = 0; i < PACKET_FIELDS.length; i++) {
@@ -160,10 +184,15 @@ export function usePacketLog() {
   const statsRef = useRef<PacketStats>(EMPTY_STATS);
   const [stats, setStats] = useState<PacketStats>(EMPTY_STATS);
 
+  /**
+   * Log one received line. Pass `link` when the radio reports RSSI/SNR separately
+   * (the simulator); pass null to read them from the end of the line, if present.
+   */
   const ingest = useCallback(
-    (raw: string, link: { rssi: number; snr: number }, expectedTeamId: string) => {
+    (raw: string, link: GroundLink | null, expectedTeamId: string): PacketRecord => {
       const rxAt = Date.now();
-      const parsed = parsePacket(raw);
+      const split = link ? { packet: raw, ...link } : splitGroundLink(raw);
+      const parsed = parsePacket(split.packet);
       const s = { ...statsRef.current, received: statsRef.current.received + 1, lastRxAt: rxAt };
       const issues: PacketIssue[] = [];
       let values: string[] | null = null;
@@ -204,23 +233,33 @@ export function usePacketLog() {
         }
       }
 
-      log.current.push({
+      const record: PacketRecord = {
         seq: s.received,
         rxAt,
         raw,
         values,
         count,
         issues,
-        rssi: link.rssi,
-        snr: link.snr,
-      });
+        rssi: split.rssi,
+        snr: split.snr,
+      };
+      log.current.push(record);
       statsRef.current = s;
       setStats(s);
+      return record;
     },
     [],
   );
 
-  return { log: log.current, stats, ingest };
+  /** Start a fresh session (e.g. when switching between simulated and live data). */
+  const reset = useCallback(() => {
+    log.current.length = 0;
+    lastCount.current = null;
+    statsRef.current = EMPTY_STATS;
+    setStats(EMPTY_STATS);
+  }, []);
+
+  return { log: log.current, stats, ingest, reset };
 }
 
 // ---- Team ID ---------------------------------------------------------------
@@ -268,6 +307,11 @@ function csvLines(rows: string[][]) {
   return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
+/** RSSI and SNR cells; left empty when the receiver did not report them. */
+export function groundCells(r: PacketRecord): [string, string] {
+  return [r.rssi === null ? "" : r.rssi.toFixed(0), r.snr === null ? "" : r.snr.toFixed(1)];
+}
+
 /** Required file name: Flight_<TEAM_ID>.csv */
 export function flightFileName(teamId: string, suffix = "") {
   return `Flight_${teamId.replace(/[^A-Za-z0-9._-]/g, "_") || "TEAM"}${suffix}.csv`;
@@ -277,9 +321,7 @@ export function flightFileName(teamId: string, suffix = "") {
 export function buildFlightCsv(log: PacketRecord[]) {
   const header = [...PACKET_FIELDS, ...GROUND_FIELDS].map((f) => f.key);
   const rows = log.flatMap((r) =>
-    r.values
-      ? [[...r.values, r.rssi.toFixed(0), r.snr.toFixed(1), new Date(r.rxAt).toISOString()]]
-      : [],
+    r.values ? [[...r.values, ...groundCells(r), new Date(r.rxAt).toISOString()]] : [],
   );
   return csvLines([header, ...rows]);
 }
@@ -307,8 +349,7 @@ export function buildStateSummaryCsv(log: PacketRecord[], n = 5) {
     const row = (r: PacketRecord, label: string) => [
       label,
       ...r.values!,
-      r.rssi.toFixed(0),
-      r.snr.toFixed(1),
+      ...groundCells(r),
       new Date(r.rxAt).toISOString(),
     ];
     first.forEach((r, i) => rows.push(row(r, `FIRST_${i + 1}`)));

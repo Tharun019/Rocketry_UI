@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, ShieldAlert } from "lucide-react";
 import { Button, StatusPill, type Tone } from "./ui";
 
-export type CmdStage = "IDLE" | "SENT" | "ACK" | "NAK" | "PASS" | "FAIL";
+export type CmdStage = "IDLE" | "SENT" | "ACK" | "NAK" | "PASS" | "FAIL" | "UNSENT";
 
 export type CommandSender = (cmd: string, onStage: (stage: CmdStage) => void) => void;
 
@@ -19,6 +19,7 @@ const STAGE: Record<Exclude<CmdStage, "IDLE">, { label: string; tone: Tone }> = 
   NAK: { label: "NAK", tone: "danger" },
   PASS: { label: "Pass", tone: "ok" },
   FAIL: { label: "Fail", tone: "danger" },
+  UNSENT: { label: "No uplink", tone: "neutral" },
 };
 
 export function CommandButton({
@@ -98,7 +99,7 @@ export function CommandGrid({
   const fire = (spec: CommandSpec) => {
     onSend(spec.name, (stage) => {
       setStages((s) => ({ ...s, [spec.name]: stage }));
-      if (stage === "PASS" || stage === "FAIL" || stage === "NAK") {
+      if (stage === "PASS" || stage === "FAIL" || stage === "NAK" || stage === "UNSENT") {
         clearTimeout(timers.current[spec.name]);
         timers.current[spec.name] = setTimeout(
           () => setStages((s) => ({ ...s, [spec.name]: "IDLE" })),

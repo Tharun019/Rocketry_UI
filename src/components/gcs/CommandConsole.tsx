@@ -6,7 +6,8 @@ export type ConsoleEntry = {
   t: string;
   channel: "ROCKET" | "SYS";
   cmd: string;
-  ack: "ACK" | "NAK" | "PENDING";
+  /** UNSENT: logged in live mode, where there is no uplink yet. */
+  ack: "ACK" | "NAK" | "PENDING" | "UNSENT";
   exec?: "PASS" | "FAIL" | "PENDING";
 };
 
@@ -14,7 +15,12 @@ type Props = {
   entries: ConsoleEntry[];
 };
 
-const ACK_COLOR = { ACK: TONE_COLOR.ok, NAK: TONE_COLOR.danger, PENDING: TONE_COLOR.warn };
+const ACK_COLOR = {
+  ACK: TONE_COLOR.ok,
+  NAK: TONE_COLOR.danger,
+  PENDING: TONE_COLOR.warn,
+  UNSENT: "var(--subtle)",
+};
 const EXEC_COLOR = { PASS: TONE_COLOR.ok, FAIL: TONE_COLOR.danger, PENDING: "var(--subtle)" };
 
 export function CommandConsole({ entries }: Props) {
@@ -60,7 +66,7 @@ export function CommandConsole({ entries }: Props) {
               </span>
               <span className="truncate text-foreground">{e.cmd}</span>
               <span className="text-[10.5px] text-right" style={{ color: ACK_COLOR[e.ack] }}>
-                {e.ack === "PENDING" ? "…" : e.ack}
+                {e.ack === "PENDING" ? "…" : e.ack === "UNSENT" ? "—" : e.ack}
               </span>
               <span
                 className="text-[10.5px] text-right"

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, Info, Rocket } from "lucide-react";
 import { StatusPill, type Tone } from "./ui";
 
-type RfStatus = { rssi: number; snr: number; quality: number };
+type RfStatus = { rssi: number | null; snr: number | null; quality: number };
 
 export type MissionEvent = { label: string; time: string };
 
@@ -103,7 +103,7 @@ export function Header({ rocketRf, alert, events, missionPhase, systemStatus }: 
               style={{ background: linkGood ? "var(--ok)" : "var(--warn)" }}
             />
             <span className="readout text-muted-foreground">
-              {rocketRf.rssi} dBm · SNR {rocketRf.snr.toFixed(1)} dB ·{" "}
+              {rocketRf.rssi ?? "—"} dBm · SNR {rocketRf.snr?.toFixed(1) ?? "—"} dB ·{" "}
               <span className="text-foreground">{rocketRf.quality.toFixed(0)}%</span>
             </span>
           </div>

@@ -6,7 +6,7 @@ type Props = {
   tx: number;
   rx: number;
   loss: number;
-  snr: number;
+  snr: number | null;
   lastPacket: string;
   rateHz: number;
   status: LinkStatus;
@@ -45,7 +45,7 @@ export function PacketMonitor({ tx, rx, loss, snr, lastPacket, rateHz, status }:
         />
       </div>
       <div className="grid grid-cols-3 gap-2">
-        <Stat label="SNR" value={snr.toFixed(1)} unit="dB" />
+        <Stat label="SNR" value={snr?.toFixed(1) ?? "—"} unit="dB" />
         <Stat label="Rate" value={rateHz.toFixed(1)} unit="Hz" />
         <Stat label="Last packet" value={lastPacket} />
       </div>

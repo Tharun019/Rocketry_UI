@@ -44,9 +44,9 @@ export function RocketDashboard({ data, onCommand }: Props) {
             />
             <TelemetryCard
               label="RSSI"
-              value={data.rssi}
+              value={data.rssi ?? "—"}
               unit="dBm"
-              sub={`SNR ${data.snr.toFixed(1)} dB`}
+              sub={`SNR ${data.snr?.toFixed(1) ?? "—"} dB`}
             />
             <TelemetryCard
               label="Link quality"

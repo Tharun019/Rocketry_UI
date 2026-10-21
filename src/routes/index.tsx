@@ -4,6 +4,9 @@ import { Header, type MissionEvent, type SystemStatus } from "@/components/gcs/H
 import { RocketDashboard } from "@/components/gcs/RocketDashboard";
 import { PacketMonitor } from "@/components/gcs/PacketMonitor";
 import { PacketsView } from "@/components/gcs/PacketsView";
+import { GroundStationPanel, type DataSource } from "@/components/gcs/GroundStationPanel";
+import { useLiveTelemetry } from "@/components/gcs/live";
+import { useSerialLines } from "@/components/gcs/serial";
 import { simulateDownlink, usePacketLog, useTeamId } from "@/components/gcs/packets";
 import { TrajectoryPanel } from "@/components/gcs/TrajectoryPanel";
 import {
@@ -18,8 +21,7 @@ import { ROCKET_STATES, ROCKET_STATE_ALIASES, useTelemetry } from "@/components/
 import { useLaunchSite } from "@/components/gcs/site";
 import type { Marker3D } from "@/components/gcs/Trajectory3D";
 import { StateTimeline } from "@/components/gcs/StateTimeline";
-import { Button, Panel, Segmented, TabBar } from "@/components/gcs/ui";
-import { Pause, Play } from "lucide-react";
+import { TabBar } from "@/components/gcs/ui";
 
 export const Route = createFileRoute("/")({
   component: GroundStation,
@@ -49,11 +51,15 @@ function stamp() {
 
 function GroundStation() {
   const { site, setSite, resetSite } = useLaunchSite();
-  const { rocket } = useTelemetry(site);
+  const [source, setSource] = useState<DataSource>("sim");
+  // Updated at the moment of switching, so effects or serial lines still in flight
+  // from the old source cannot land in the freshly cleared log.
+  const sourceRef = useRef<DataSource>("sim");
+  const sim = useTelemetry(site, source === "sim");
+  const live = useLiveTelemetry(site);
+  const rocket = source === "sim" ? sim.rocket : live.rocket;
   const [entries, setEntries] = useState<ConsoleEntry[]>([]);
   const nextId = useRef(1);
-  const [simSpeed, setSimSpeed] = useState<"1x" | "2x" | "5x">("1x");
-  const [rfChannel, setRfChannel] = useState("433.920 MHz");
 
   const [tab, setTab] = useState<"flight" | "packets">("flight");
 
@@ -61,11 +67,51 @@ function GroundStation() {
   // Every telemetry frame arrives as one ASCII packet line; it is parsed and
   // logged like a real receiver would, independent of which tab is open.
   const { teamId, setTeamId } = useTeamId();
-  const { log: packetLog, stats: packetStats, ingest } = usePacketLog();
+  const { log: packetLog, stats: packetStats, ingest, reset: resetPackets } = usePacketLog();
   useEffect(() => {
-    if (rocket.packetCount === 0) return;
-    ingest(simulateDownlink(rocket, teamId), { rssi: rocket.rssi, snr: rocket.snr }, teamId);
-  }, [rocket.packetCount]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (sourceRef.current !== "sim" || sim.rocket.packetCount === 0) return;
+    const f = sim.rocket;
+    ingest(simulateDownlink(f, teamId), { rssi: f.rssi, snr: f.snr }, teamId);
+  }, [sim.rocket.packetCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Live downlink over USB --------------------------------------------
+  // The ground-station Teensy prints one decoded packet per line; each line is
+  // logged like a simulated one and, when valid, drives every panel.
+  const [baud, setBaud] = useState(115200);
+  const [lastLine, setLastLine] = useState<string | null>(null);
+  const serial = useSerialLines((line) => {
+    if (sourceRef.current !== "live") return;
+    setLastLine(line);
+    live.apply(ingest(line, null, teamId));
+  });
+
+  const changeSource = (next: DataSource) => {
+    if (next === source) return;
+    if (
+      source === "live" &&
+      packetStats.received > 0 &&
+      !window.confirm(
+        `Switch to simulation? This clears the ${packetStats.received.toLocaleString()} live packets received so far. Export the CSV first if you need them.`,
+      )
+    )
+      return;
+    sourceRef.current = next;
+    if (source === "live") void serial.disconnect();
+    resetPackets();
+    live.reset();
+    setLastLine(null);
+    setEvents([]);
+    setSource(next);
+  };
+
+  // Packets drive re-renders in simulation; in live mode tick once a second so a
+  // silent link still raises the timeout alert.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (source !== "live") return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [source]);
 
   // ---- Mission event log -------------------------------------------------
   const [events, setEvents] = useState<MissionEvent[]>([]);
@@ -100,6 +146,12 @@ function GroundStation() {
         { id, t: stamp(), channel, cmd, ack: "PENDING" as const, exec: "PENDING" as const },
       ].slice(-80),
     );
+    // Live mode has no uplink yet: log the command but do not pretend it was sent.
+    if (source === "live") {
+      setEntries((e) => e.map((x) => (x.id === id ? { ...x, ack: "UNSENT" } : x)));
+      onStage?.("UNSENT");
+      return;
+    }
     onStage?.("SENT");
 
     const acked = Math.random() > 0.06;
@@ -143,8 +195,12 @@ function GroundStation() {
       source: ActiveAlert["source"];
       detail?: string;
     }[] = [];
-    const rocketStale = rocket.lastPacketAt > 0 && now - rocket.lastPacketAt > 3000;
-    if (rocket.linkQuality < 62 || rocket.rssi < -100)
+    if (parachuteFail)
+      list.push({ type: "PARACHUTE COMMAND FAILED", level: "danger", source: "SYS" });
+    // Nothing to judge until the first packet arrives.
+    if (rocket.lastPacketAt === 0) return list;
+    const rocketStale = now - rocket.lastPacketAt > 3000;
+    if (rocket.linkQuality < 62 || (rocket.rssi !== null && rocket.rssi < -100))
       list.push({ type: "COMMUNICATION LOST", level: "danger", source: "ROCKET" });
     if (rocketStale) list.push({ type: "TELEMETRY TIMEOUT", level: "danger", source: "ROCKET" });
     if (rocket.battery < 11.2)
@@ -162,8 +218,6 @@ function GroundStation() {
         detail: `${rocket.temperature.toFixed(1)} °C`,
       });
     if (!rocket.gpsValid) list.push({ type: "GPS INVALID", level: "warn", source: "ROCKET" });
-    if (parachuteFail)
-      list.push({ type: "PARACHUTE COMMAND FAILED", level: "danger", source: "SYS" });
     return list;
   }, [
     rocket.linkQuality,
@@ -244,8 +298,14 @@ function GroundStation() {
     if (warn) return { level: "warn" as const, message: `${warn.type} · ${warn.source}` };
     if (rocket.state === "IMPACT")
       return { level: "info" as const, message: "ROCKET LANDED · RECOVERY" };
-    return { level: "info" as const, message: "SIMULATION MODE · TELEMETRY NOMINAL" };
-  }, [activeAlerts, rocket.state]);
+    if (source === "sim")
+      return { level: "info" as const, message: "SIMULATION MODE · TELEMETRY NOMINAL" };
+    if (serial.status !== "open")
+      return { level: "info" as const, message: "LIVE MODE · GROUND STATION NOT CONNECTED" };
+    if (rocket.lastPacketAt === 0)
+      return { level: "info" as const, message: "LIVE MODE · WAITING FOR PACKETS" };
+    return { level: "info" as const, message: "LIVE MODE · TELEMETRY NOMINAL" };
+  }, [activeAlerts, rocket.state, rocket.lastPacketAt, source, serial.status]);
 
   // Apogee = highest recorded fix (firmware APOGEE state can lag the true peak).
   const apogeePoint = useMemo(
@@ -354,46 +414,17 @@ function GroundStation() {
               rateHz={rocket.updateRate}
               status={linkStatus(rocket.linkQuality, rocket.lastPacketAt)}
             />
-            <Panel
-              title="Radio & playback"
-              meta="Ground station"
-              bodyClassName="flex flex-col gap-4"
-            >
-              <label className="flex flex-col gap-1.5">
-                <span className="eyebrow">Frequency</span>
-                <select
-                  value={rfChannel}
-                  onChange={(e) => setRfChannel(e.target.value)}
-                  className="h-9 rounded-md border border-border bg-well px-2.5 readout text-[13px] focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-ring/40"
-                >
-                  <option>433.920 MHz</option>
-                  <option>868.100 MHz</option>
-                  <option>915.000 MHz</option>
-                  <option>2.4 GHz</option>
-                </select>
-              </label>
-              <div className="flex flex-col gap-1.5">
-                <span className="eyebrow">Playback speed</span>
-                <Segmented
-                  options={[
-                    { id: "1x", label: "1×" },
-                    { id: "2x", label: "2×" },
-                    { id: "5x", label: "5×" },
-                  ]}
-                  value={simSpeed}
-                  onChange={setSimSpeed}
-                  className="w-full [&>button]:flex-1"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2 mt-auto">
-                <Button size="md" onClick={() => pushCommand("SYS", "PLAYBACK_START")}>
-                  <Play className="h-3.5 w-3.5" /> Start
-                </Button>
-                <Button size="md" onClick={() => pushCommand("SYS", "PLAYBACK_PAUSE")}>
-                  <Pause className="h-3.5 w-3.5" /> Pause
-                </Button>
-              </div>
-            </Panel>
+            <GroundStationPanel
+              source={source}
+              onSourceChange={changeSource}
+              status={serial.status}
+              error={serial.error}
+              baud={baud}
+              onBaudChange={setBaud}
+              onConnect={() => void serial.connect(baud)}
+              onDisconnect={() => void serial.disconnect()}
+              lastLine={lastLine}
+            />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -405,7 +436,10 @@ function GroundStation() {
 
       <footer className="border-t border-border">
         <div className="mx-auto max-w-[1920px] px-6 h-10 flex items-center justify-between text-[11px] text-subtle">
-          <span>Rocket Ground Station v1.0 · Simulated telemetry</span>
+          <span>
+            Rocket Ground Station v1.0 ·{" "}
+            {source === "sim" ? "Simulated telemetry" : "Live telemetry · USB"}
+          </span>
           <span>© Team ROCKETRY-020 · 2026</span>
         </div>
       </footer>

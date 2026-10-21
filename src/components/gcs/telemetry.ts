@@ -51,7 +51,7 @@ export type RocketMarkers = {
 const WIND = { toBearing: 65, speed: 6 };
 /** Launch rail tilt off vertical (deg). */
 const RAIL_TILT = 4;
-const TRACK_MAX = 20000; // ~66 min at 5 Hz
+export const TRACK_MAX = 20000; // ~66 min at 5 Hz
 /** Launch site height above mean sea level (m), used for the simulated GNSS altitude. */
 const SITE_MSL = 100;
 
@@ -65,8 +65,9 @@ export type RocketFrame = {
   accel: [number, number, number];
   gyro: [number, number, number];
   battery: number;
-  rssi: number;
-  snr: number;
+  /** Ground-receiver link figures; null when live data does not include them. */
+  rssi: number | null;
+  snr: number | null;
   linkQuality: number;
   lastPacketAt: number;
   updateRate: number;
@@ -106,7 +107,7 @@ export type RocketFrame = {
 
 const MAX = 120;
 
-function push(arr: Sample[], t: number, v: number): Sample[] {
+export function pushSample(arr: Sample[], t: number, v: number): Sample[] {
   const next = arr.length >= MAX ? arr.slice(1) : arr.slice();
   next.push({ t, v });
   return next;
@@ -157,14 +158,41 @@ function initialFrame(site: LaunchSite): RocketFrame {
   };
 }
 
-/** Simulated telemetry. Restarts whenever the launch site changes. */
-export function useTelemetry(site: LaunchSite) {
+/** Starting frame for live data: nothing measured yet. */
+export function liveInitialFrame(site: LaunchSite): RocketFrame {
+  return {
+    ...initialFrame(site),
+    state: "BOOT",
+    pressure: 0,
+    temperature: 0,
+    accel: [0, 0, 0],
+    battery: 0,
+    rssi: null,
+    snr: null,
+    linkQuality: 0,
+    updateRate: 0,
+    gpsValid: false,
+    gnssAlt: 0,
+    gnssSats: 0,
+    path: [],
+    track: [],
+    markers: {},
+    stateFixes: {},
+  };
+}
+
+/**
+ * Simulated telemetry. Restarts whenever the launch site changes, or when it is
+ * re-enabled; paused while live data is shown.
+ */
+export function useTelemetry(site: LaunchSite, enabled = true) {
   const t0 = useRef(Date.now());
   const [rocket, setRocket] = useState<RocketFrame>(() => initialFrame(site));
 
   useEffect(() => {
     t0.current = Date.now();
     setRocket(initialFrame(site));
+    if (!enabled) return;
     const id = setInterval(() => {
       const t = (Date.now() - t0.current) / 1000;
       const now = Date.now();
@@ -261,7 +289,7 @@ export function useTelemetry(site: LaunchSite) {
           gyro,
           battery,
           rssi: -55 - Math.round(Math.random() * 20),
-          snr: Math.max(-4, Math.min(12, r.snr + (Math.random() - 0.5) * 1.2)),
+          snr: Math.max(-4, Math.min(12, (r.snr ?? 9.5) + (Math.random() - 0.5) * 1.2)),
           linkQuality: Math.max(60, Math.min(100, r.linkQuality + (Math.random() - 0.5) * 4)),
           lastPacketAt: now,
           updateRate: 4.6 + Math.random() * 0.8,
@@ -282,19 +310,19 @@ export function useTelemetry(site: LaunchSite) {
           markers,
           stateFixes,
           charts: {
-            altitude: push(r.charts.altitude, t, alt),
-            velocity: push(r.charts.velocity, t, vel),
-            acceleration: push(r.charts.acceleration, t, accel[2]),
-            gyro: push(r.charts.gyro, t, gyro[0]),
-            pressure: push(r.charts.pressure, t, 1013 - alt * 0.11),
-            temperature: push(r.charts.temperature, t, 24 - alt * 0.006),
-            battery: push(r.charts.battery, t, battery),
+            altitude: pushSample(r.charts.altitude, t, alt),
+            velocity: pushSample(r.charts.velocity, t, vel),
+            acceleration: pushSample(r.charts.acceleration, t, accel[2]),
+            gyro: pushSample(r.charts.gyro, t, gyro[0]),
+            pressure: pushSample(r.charts.pressure, t, 1013 - alt * 0.11),
+            temperature: pushSample(r.charts.temperature, t, 24 - alt * 0.006),
+            battery: pushSample(r.charts.battery, t, battery),
           },
         };
       });
     }, 200);
     return () => clearInterval(id);
-  }, [site.lat, site.lon]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [site.lat, site.lon, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { rocket };
 }
