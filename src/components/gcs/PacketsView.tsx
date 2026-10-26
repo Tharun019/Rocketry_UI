@@ -31,6 +31,7 @@ const ISSUE_TONE: Record<IssueKind, Tone> = {
   DUPLICATE: "warn",
   RESET: "warn",
   TEAM_ID: "warn",
+  WARNING: "warn",
 };
 
 function rxTime(ms: number) {

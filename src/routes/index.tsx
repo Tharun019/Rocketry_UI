@@ -7,7 +7,29 @@ import { PacketsView } from "@/components/gcs/PacketsView";
 import { GroundStationPanel, type DataSource } from "@/components/gcs/GroundStationPanel";
 import { useLiveTelemetry } from "@/components/gcs/live";
 import { useSerialLines } from "@/components/gcs/serial";
-import { simulateDownlink, usePacketLog, useTeamId } from "@/components/gcs/packets";
+import {
+  buildFlightCsv,
+  flightCsvRow,
+  flightFileName,
+  simulateDownlink,
+  usePacketLog,
+  useTeamId,
+  type GroundLink as RfFigures,
+} from "@/components/gcs/packets";
+import { GroundLink, type LinkMode } from "@/components/gcs/link";
+import { CHANNELS, type ChannelId } from "@/components/gcs/protocol";
+import {
+  LiveCsvFile,
+  PacketBackup,
+  fileRecordingSupported,
+  type SavedLine,
+} from "@/components/gcs/persist";
+import {
+  alertKey,
+  stepAlerts,
+  type AlertCondition,
+  type DebounceState,
+} from "@/components/gcs/alerts";
 import { TrajectoryPanel } from "@/components/gcs/TrajectoryPanel";
 import {
   AlertsPanel,
@@ -75,15 +97,144 @@ function GroundStation() {
   }, [sim.rocket.packetCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Live downlink over USB --------------------------------------------
-  // The ground-station Teensy prints one decoded packet per line; each line is
-  // logged like a simulated one and, when valid, drives every panel.
+  // Every line from the ground-station Teensy goes through the radio link layer:
+  // in RAK mode it configures the RAK3272S and unwraps +EVT:RXP2P packets; in
+  // plain mode the Teensy prints packets itself. Each packet is logged, saved to
+  // the browser backup (and the live CSV file, if recording) and drives every panel.
   const [baud, setBaud] = useState(115200);
   const [lastLine, setLastLine] = useState<string | null>(null);
-  const serial = useSerialLines((line) => {
+  const [linkMode, setLinkMode] = useState<LinkMode>("rak");
+  const [channel, setChannel] = useState<ChannelId>("main");
+  const linkRef = useRef<GroundLink | null>(null);
+  linkRef.current ??= new GroundLink();
+  const link = linkRef.current;
+  const [, setLinkVersion] = useState(0);
+
+  const backupRef = useRef<PacketBackup | null>(null);
+  backupRef.current ??= new PacketBackup();
+  const backup = backupRef.current;
+  const [savedCount, setSavedCount] = useState(0);
+  const [restoreOffer, setRestoreOffer] = useState(0);
+  // While a restore is replaying, new packets wait here so nothing is lost or reordered.
+  const restoring = useRef<Promise<void> | null>(null);
+  const fileRef = useRef<LiveCsvFile | null>(null);
+  const [, setFileVersion] = useState(0);
+
+  const recordLive = (raw: string, rf: RfFigures | null, at?: number, save = true) => {
+    const rec = ingest(raw, rf, teamId, at);
+    live.apply(rec);
+    if (save) {
+      backup.add({ rxAt: rec.rxAt, raw, rssi: rec.rssi, snr: rec.snr, viaLink: rf !== null });
+      setSavedCount((n) => n + 1);
+    }
+    const row = flightCsvRow(rec);
+    if (row && fileRef.current) {
+      fileRef.current.append(row);
+      setFileVersion((n) => n + 1);
+    }
+  };
+
+  const restoreBackup = (): Promise<void> => {
+    if (restoring.current) return restoring.current;
+    const run = (async () => {
+      const lines: SavedLine[] = await backup.loadAll().catch(() => []);
+      sourceRef.current = "live";
+      setSource("live");
+      resetPackets();
+      live.reset();
+      for (const l of lines)
+        recordLive(l.raw, l.viaLink ? { rssi: l.rssi, snr: l.snr } : null, l.rxAt, false);
+      setSavedCount(lines.length);
+      setRestoreOffer(0);
+    })();
+    restoring.current = run;
+    void run.finally(() => {
+      restoring.current = null;
+    });
+    return run;
+  };
+
+  link.onChange = () => setLinkVersion((n) => n + 1);
+  link.onPacket = (line, rf) => {
     if (sourceRef.current !== "live") return;
-    setLastLine(line);
-    live.apply(ingest(line, null, teamId));
-  });
+    // A saved session not yet restored: put it back first, then add this packet after it.
+    if (restoreOffer > 0 || restoring.current) {
+      const pending = restoreOffer > 0 ? restoreBackup() : restoring.current!;
+      const at = Date.now();
+      void pending.then(() => recordLive(line, rf, at));
+      return;
+    }
+    recordLive(line, rf);
+  };
+
+  const serial = useSerialLines(
+    (line) => {
+      if (sourceRef.current !== "live") return;
+      setLastLine(line);
+      link.feedLine(line);
+    },
+    {
+      onOpen: (write) => void link.attach(write),
+      onClose: () => link.detach(),
+    },
+  );
+
+  // Offer the previous live session after a reload; flush the backup when the tab goes away.
+  useEffect(() => {
+    void backup.count().then((n) => n > 0 && setRestoreOffer(n));
+    const flush = () => void backup.flush();
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+    };
+  }, [backup]);
+
+  const changeLinkMode = (m: LinkMode) => {
+    link.mode = m;
+    setLinkMode(m);
+  };
+  const changeChannel = (c: ChannelId) => {
+    setChannel(c);
+    link.radio = { ...link.radio, hz: CHANNELS.find((x) => x.id === c)!.hz };
+    if (link.connected) void link.configure();
+  };
+
+  const startNewSession = () => {
+    if (
+      packetStats.received > 0 &&
+      !window.confirm(
+        `Clear the ${packetStats.received.toLocaleString()} packets received so far and start a new session? Export the CSV first if you need them.`,
+      )
+    )
+      return;
+    resetPackets();
+    live.reset();
+    void backup.clear();
+    setSavedCount(0);
+    setRestoreOffer(0);
+    setEvents([]);
+  };
+
+  const startFile = async () => {
+    try {
+      const valid = packetLog.filter((r) => r.values).length;
+      const f = await LiveCsvFile.create(flightFileName(teamId), buildFlightCsv(packetLog), valid);
+      if (f) {
+        fileRef.current = f;
+        setFileVersion((n) => n + 1);
+      }
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const stopFile = async () => {
+    const f = fileRef.current;
+    fileRef.current = null;
+    await f?.stop();
+    setFileVersion((n) => n + 1);
+  };
 
   const changeSource = (next: DataSource) => {
     if (next === source) return;
@@ -96,11 +247,17 @@ function GroundStation() {
     )
       return;
     sourceRef.current = next;
-    if (source === "live") void serial.disconnect();
+    if (source === "live") {
+      void serial.disconnect();
+      void stopFile();
+      void backup.clear();
+      setSavedCount(0);
+    }
     resetPackets();
     live.reset();
     setLastLine(null);
     setEvents([]);
+    debounce.current.clear();
     setSource(next);
   };
 
@@ -146,10 +303,25 @@ function GroundStation() {
         { id, t: stamp(), channel, cmd, ack: "PENDING" as const, exec: "PENDING" as const },
       ].slice(-80),
     );
-    // Live mode has no uplink yet: log the command but do not pretend it was sent.
+    const update = (patch: Partial<ConsoleEntry>) =>
+      setEntries((e) => e.map((x) => (x.id === id ? { ...x, ...patch } : x)));
     if (source === "live") {
-      setEntries((e) => e.map((x) => (x.id === id ? { ...x, ack: "UNSENT" } : x)));
-      onStage?.("UNSENT");
+      // Not connected: log the command but do not pretend it was sent.
+      if (!link.connected) {
+        update({ ack: "UNSENT", note: "USB not connected" });
+        onStage?.("UNSENT");
+        return;
+      }
+      link.sendCommand(cmd, (stage, detail) => {
+        if (stage === "SENT") update({ note: "on air, waiting for ACK" });
+        if (stage === "ACK") update({ ack: "ACK", note: "waiting for execution report" });
+        if (stage === "NAK") update({ ack: "NAK", exec: "FAIL", note: detail });
+        if (stage === "PASS") update({ exec: "PASS", note: detail });
+        if (stage === "FAIL") update({ exec: "FAIL", note: detail });
+        onStage?.(stage);
+        if ((stage === "NAK" || stage === "FAIL") && cmd.startsWith("DEPLOY"))
+          raiseParachuteFailure();
+      });
       return;
     }
     onStage?.("SENT");
@@ -189,20 +361,18 @@ function GroundStation() {
 
   const now = Date.now();
   const conditions = useMemo(() => {
-    const list: {
-      type: AlertType;
-      level: "warn" | "danger";
-      source: ActiveAlert["source"];
-      detail?: string;
-    }[] = [];
+    const list: (AlertCondition<AlertType> & { source: ActiveAlert["source"] })[] = [];
+    // Shown at once: a failed deploy is never noise.
     if (parachuteFail)
-      list.push({ type: "PARACHUTE COMMAND FAILED", level: "danger", source: "SYS" });
+      list.push({ type: "PARACHUTE COMMAND FAILED", level: "danger", source: "SYS", raiseMs: 0 });
     // Nothing to judge until the first packet arrives.
     if (rocket.lastPacketAt === 0) return list;
     const rocketStale = now - rocket.lastPacketAt > 3000;
     if (rocket.linkQuality < 62 || (rocket.rssi !== null && rocket.rssi < -100))
       list.push({ type: "COMMUNICATION LOST", level: "danger", source: "ROCKET" });
-    if (rocketStale) list.push({ type: "TELEMETRY TIMEOUT", level: "danger", source: "ROCKET" });
+    // Already means 3 s of silence, so no extra hold before raising it.
+    if (rocketStale)
+      list.push({ type: "TELEMETRY TIMEOUT", level: "danger", source: "ROCKET", raiseMs: 0 });
     if (rocket.battery < 11.2)
       list.push({
         type: "LOW BATTERY",
@@ -233,40 +403,55 @@ function GroundStation() {
   const [activeAlerts, setActiveAlerts] = useState<ActiveAlert[]>([]);
   const [alertHistory, setAlertHistory] = useState<AlertHistoryEntry[]>([]);
   const alertId = useRef(1);
+  // Debounced: a condition must hold ~2 s to raise and be gone ~3 s to clear.
+  const debounce = useRef<DebounceState>(new Map());
   useEffect(() => {
+    const { raised, cleared, active } = stepAlerts(debounce.current, conditions, Date.now());
+    const byKey = new Map(conditions.map((c) => [alertKey(c), c]));
     setActiveAlerts((prev) => {
-      const key = (a: { type: string; source: string }) => `${a.type}|${a.source}`;
-      const prevMap = new Map(prev.map((a) => [key(a), a]));
-      const next: ActiveAlert[] = conditions.map((c) => {
-        const existing = prevMap.get(key(c));
-        return existing ? { ...existing, detail: c.detail } : { ...c, since: stamp() };
-      });
-      const nextKeys = new Set(next.map(key));
-      const added = next.filter((a) => !prevMap.has(key(a)));
-      const removed = prev.filter((a) => !nextKeys.has(key(a)));
-      if (added.length || removed.length) {
-        setAlertHistory((h) =>
-          [
-            ...h,
-            ...added.map((a) => ({
-              id: alertId.current++,
-              type: a.type,
-              source: a.source,
-              time: stamp(),
-              action: "RAISED" as const,
-            })),
-            ...removed.map((a) => ({
-              id: alertId.current++,
-              type: a.type,
-              source: a.source,
-              time: stamp(),
-              action: "CLEARED" as const,
-            })),
-          ].slice(-60),
-        );
+      const prevMap = new Map(prev.map((a) => [alertKey(a), a]));
+      const next: ActiveAlert[] = [];
+      for (const k of active) {
+        const c = byKey.get(k);
+        const existing = prevMap.get(k);
+        if (existing) next.push(c ? { ...existing, detail: c.detail } : existing);
+        else if (c)
+          next.push({
+            type: c.type,
+            level: c.level,
+            source: c.source,
+            detail: c.detail,
+            since: stamp(),
+          });
       }
-      return added.length || removed.length ? next : prev;
+      const same =
+        next.length === prev.length &&
+        next.every(
+          (a, i) =>
+            a === prev[i] ||
+            (prev[i] && a.detail === prev[i].detail && alertKey(a) === alertKey(prev[i])),
+        );
+      return same ? prev : next;
     });
+    if (raised.length || cleared.length) {
+      const entry = (k: string, action: "RAISED" | "CLEARED") => {
+        const [type, src] = k.split("|");
+        return {
+          id: alertId.current++,
+          type: type as AlertType,
+          source: src,
+          time: stamp(),
+          action,
+        };
+      };
+      setAlertHistory((h) =>
+        [
+          ...h,
+          ...raised.map((k) => entry(k, "RAISED")),
+          ...cleared.map((k) => entry(k, "CLEARED")),
+        ].slice(-60),
+      );
+    }
   }, [conditions]);
 
   // ---- Derived mission phase / status ------------------------------------
@@ -424,6 +609,48 @@ function GroundStation() {
               onConnect={() => void serial.connect(baud)}
               onDisconnect={() => void serial.disconnect()}
               lastLine={lastLine}
+              linkMode={linkMode}
+              onLinkModeChange={changeLinkMode}
+              channel={channel}
+              onChannelChange={changeChannel}
+              radioState={link.state}
+              radioDetail={link.stateDetail}
+              radioLog={link.log}
+              onReconfigure={() => void link.configure()}
+              backup={{
+                saved: savedCount,
+                error: backup.error,
+                offer:
+                  restoreOffer > 0
+                    ? {
+                        count: restoreOffer,
+                        onRestore: () => void restoreBackup(),
+                        onDiscard: () => {
+                          if (
+                            !window.confirm(
+                              `Delete the ${restoreOffer.toLocaleString()} saved packets? This cannot be undone.`,
+                            )
+                          )
+                            return;
+                          void backup.clear();
+                          setRestoreOffer(0);
+                        },
+                      }
+                    : null,
+                onNewSession: startNewSession,
+              }}
+              fileRec={{
+                supported: fileRecordingSupported(),
+                active: fileRef.current
+                  ? {
+                      name: fileRef.current.name,
+                      rows: fileRef.current.rows,
+                      error: fileRef.current.error,
+                    }
+                  : null,
+                onStart: () => void startFile(),
+                onStop: () => void stopFile(),
+              }}
             />
           </div>
 

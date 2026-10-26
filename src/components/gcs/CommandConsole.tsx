@@ -9,6 +9,8 @@ export type ConsoleEntry = {
   /** UNSENT: logged in live mode, where there is no uplink yet. */
   ack: "ACK" | "NAK" | "PENDING" | "UNSENT";
   exec?: "PASS" | "FAIL" | "PENDING";
+  /** Latest word from the uplink, e.g. "retry 2" or "NO ACK after 5 tries". */
+  note?: string;
 };
 
 type Props = {
@@ -64,7 +66,10 @@ export function CommandConsole({ entries }: Props) {
               >
                 {e.channel}
               </span>
-              <span className="truncate text-foreground">{e.cmd}</span>
+              <span className="truncate text-foreground" title={e.note}>
+                {e.cmd}
+                {e.note ? <span className="text-subtle"> · {e.note}</span> : null}
+              </span>
               <span className="text-[10.5px] text-right" style={{ color: ACK_COLOR[e.ack] }}>
                 {e.ack === "PENDING" ? "…" : e.ack === "UNSENT" ? "—" : e.ack}
               </span>

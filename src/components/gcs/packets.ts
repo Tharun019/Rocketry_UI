@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ROCKET_STATES, type RocketFrame } from "./telemetry";
+import type { RocketFrame } from "./telemetry";
+import { cleanNumber, normalizeState, unframe } from "./protocol";
 
 /**
  * Downlink packet format (IN-SPACe Model Rocketry telemetry, section 6.3).
@@ -91,7 +92,7 @@ export function simulateDownlink(f: RocketFrame, teamId: string): string {
   return Math.random() < 0.005 ? line.slice(0, Math.floor(line.length * Math.random())) : line;
 }
 
-export type IssueKind = "MALFORMED" | "GAP" | "DUPLICATE" | "RESET" | "TEAM_ID";
+export type IssueKind = "MALFORMED" | "GAP" | "DUPLICATE" | "RESET" | "TEAM_ID" | "WARNING";
 export type PacketIssue = { kind: IssueKind; detail: string };
 
 export type PacketRecord = {
@@ -133,40 +134,106 @@ const EMPTY_STATS: PacketStats = {
   lastRxAt: 0,
 };
 
+/** Columns of the rulebook line: the 16 spec rows, accelerometer as one "ax;ay;az" cell. */
+export const RULEBOOK_COLS = 16;
+
 /**
- * A live receiver line is the packet, optionally followed by the ground station's
- * own RSSI and SNR as two extra fields.
+ * A plain receiver line may end with the ground station's own RSSI and SNR as
+ * two extra fields (after a 23-column or a 16-column packet).
  */
 export function splitGroundLink(raw: string): { packet: string } & GroundLink {
   const parts = raw.replace(/[\r\n]+$/, "").split(",");
-  if (parts.length === PACKET_FIELDS.length + 2) {
-    const [rssi, snr] = parts.slice(PACKET_FIELDS.length).map((v) => v.trim());
+  if (parts.length === PACKET_FIELDS.length + 2 || parts.length === RULEBOOK_COLS + 2) {
+    const [rssi, snr] = parts.slice(-2).map((v) => v.trim());
     if (rssi !== "" && snr !== "" && Number.isFinite(Number(rssi)) && Number.isFinite(Number(snr)))
-      return {
-        packet: parts.slice(0, PACKET_FIELDS.length).join(","),
-        rssi: Number(rssi),
-        snr: Number(snr),
-      };
+      return { packet: parts.slice(0, -2).join(","), rssi: Number(rssi), snr: Number(snr) };
   }
   return { packet: raw, rssi: null, snr: null };
 }
 
-export function parsePacket(raw: string): { values: string[] } | { error: string } {
-  const values = raw
-    .replace(/[\r\n]+$/, "")
-    .split(",")
-    .map((v) => v.trim());
-  if (values.length !== PACKET_FIELDS.length)
-    return { error: `Expected ${PACKET_FIELDS.length} fields, got ${values.length}` };
+/** Keys allowed in the rulebook line's optional "KEY=val;KEY=val" field → our column. */
+const OPTIONAL_KEYS: Record<string, string> = {
+  VEL: "VELOCITY",
+  VELOCITY: "VELOCITY",
+  VZ: "VELOCITY",
+  GX: "GYRO_X",
+  GYRO_X: "GYRO_X",
+  GY: "GYRO_Y",
+  GYRO_Y: "GYRO_Y",
+  ROLL: "ROLL",
+  PITCH: "PITCH",
+};
+
+/**
+ * Rulebook line (spec 6.3): TEAM_ID, TIME, COUNT, ALT, PRESSURE, TEMP, VOLTAGE,
+ * GNSS_TIME, LAT, LON, GNSS_ALT, SATS, "ax;ay;az[;roll;pitch]", SPIN, STATE,
+ * [OPTIONAL]. Returned as our 23 columns. The optional field is kept as sent;
+ * any KEY=val pairs we know also fill their own columns.
+ */
+function fromRulebook(cols: string[]): string[] | { error: string } {
+  const v = new Array<string>(PACKET_FIELDS.length).fill("");
+  for (let i = 0; i < 12; i++) v[i] = cols[i];
+  const accel = cols[12].split(";").map((s) => s.trim());
+  if (accel.length === 1 && accel[0] !== "")
+    return { error: `Acceleration field needs ax;ay;az, got "${cols[12]}"` };
+  if (![1, 3, 5].includes(accel.length))
+    return { error: `Acceleration field needs ax;ay;az or ax;ay;az;roll;pitch, got "${cols[12]}"` };
+  if (accel.length >= 3)
+    [v[FIELD_INDEX.ACCEL_X], v[FIELD_INDEX.ACCEL_Y], v[FIELD_INDEX.ACCEL_Z]] = accel;
+  if (accel.length === 5) [v[FIELD_INDEX.ROLL], v[FIELD_INDEX.PITCH]] = accel.slice(3);
+  v[FIELD_INDEX.GYRO_SPIN_RATE] = cols[13];
+  v[FIELD_INDEX.FLIGHT_SOFTWARE_STATE] = cols[14];
+  const optional = cols[15] ?? "";
+  v[FIELD_INDEX.OPTIONAL_DATA] = optional;
+  for (const pair of optional.split(";")) {
+    const eq = pair.indexOf("=");
+    if (eq < 0) continue;
+    const key = OPTIONAL_KEYS[pair.slice(0, eq).trim().toUpperCase()];
+    if (key) v[FIELD_INDEX[key]] = pair.slice(eq + 1).trim();
+  }
+  return v;
+}
+
+/**
+ * Accepts the 23-column line and the 16-column (or 15, without the optional
+ * field) rulebook line, with or without an "*HH" checksum. Empty numbers mean
+ * "no reading" (e.g. no GPS fix) and are kept empty; an unknown state is kept
+ * as sent with a warning. Only garbage in a number field rejects the line.
+ * Values come back as our 23 columns, the state in its UI name.
+ */
+export function parsePacket(
+  raw: string,
+): { values: string[]; warnings: string[] } | { error: string } {
+  const u = unframe(raw.replace(/[\r\n]+$/, "").trim());
+  if ("error" in u) return u;
+  const cols = u.body.split(",").map((c) => c.trim());
+  if (/^TEAM[_ ]?ID$/i.test(cols[0])) return { error: "Header row, not a packet" };
+
+  let values: string[];
+  if (cols.length === PACKET_FIELDS.length) values = cols;
+  else if (cols.length === RULEBOOK_COLS || cols.length === RULEBOOK_COLS - 1) {
+    const r = fromRulebook(cols);
+    if ("error" in r) return r;
+    values = r;
+  } else
+    return {
+      error: `Expected ${RULEBOOK_COLS} (rulebook) or ${PACKET_FIELDS.length} fields, got ${cols.length}`,
+    };
+
   for (let i = 0; i < PACKET_FIELDS.length; i++) {
     const f = PACKET_FIELDS[i];
-    if (f.dp !== undefined && (values[i] === "" || !Number.isFinite(Number(values[i]))))
-      return { error: `${f.key} is not a number: "${values[i]}"` };
+    if (f.dp === undefined) continue;
+    const n = cleanNumber(values[i]);
+    if (n === null) return { error: `${f.key} is not a number: "${values[i]}"` };
+    values[i] = n;
   }
-  const state = values[FIELD_INDEX.FLIGHT_SOFTWARE_STATE];
-  if (!(ROCKET_STATES as string[]).includes(state))
-    return { error: `Unknown flight software state "${state}"` };
-  return { values };
+
+  const warnings: string[] = [];
+  const si = FIELD_INDEX.FLIGHT_SOFTWARE_STATE;
+  const state = normalizeState(values[si]);
+  if (state) values[si] = state;
+  else warnings.push(`Unknown flight software state "${values[si]}"`);
+  return { values, warnings };
 }
 
 export function fieldValue(r: PacketRecord, key: string): string | undefined {
@@ -189,8 +256,8 @@ export function usePacketLog() {
    * (the simulator); pass null to read them from the end of the line, if present.
    */
   const ingest = useCallback(
-    (raw: string, link: GroundLink | null, expectedTeamId: string): PacketRecord => {
-      const rxAt = Date.now();
+    (raw: string, link: GroundLink | null, expectedTeamId: string, at?: number): PacketRecord => {
+      const rxAt = at ?? Date.now();
       const split = link ? { packet: raw, ...link } : splitGroundLink(raw);
       const parsed = parsePacket(split.packet);
       const s = { ...statsRef.current, received: statsRef.current.received + 1, lastRxAt: rxAt };
@@ -203,10 +270,12 @@ export function usePacketLog() {
         issues.push({ kind: "MALFORMED", detail: parsed.error });
       } else {
         values = parsed.values;
-        count = Number(values[FIELD_INDEX.PACKET_COUNT]);
+        const countText = values[FIELD_INDEX.PACKET_COUNT];
+        count = countText === "" ? null : Number(countText);
         s.valid++;
+        for (const w of parsed.warnings) issues.push({ kind: "WARNING", detail: w });
         const prev = lastCount.current;
-        if (prev !== null) {
+        if (prev !== null && count !== null) {
           if (count > prev + 1) {
             const n = count - prev - 1;
             s.missed += n;
@@ -225,7 +294,7 @@ export function usePacketLog() {
             issues.push({ kind: "RESET", detail: `Counter went back from #${prev} to #${count}` });
           }
         }
-        lastCount.current = count;
+        if (count !== null) lastCount.current = count;
         const team = values[FIELD_INDEX.TEAM_ID];
         if (team !== expectedTeamId) {
           s.teamMismatch++;
@@ -317,13 +386,18 @@ export function flightFileName(teamId: string, suffix = "") {
   return `Flight_${teamId.replace(/[^A-Za-z0-9._-]/g, "_") || "TEAM"}${suffix}.csv`;
 }
 
+export const FLIGHT_CSV_HEADER = [...PACKET_FIELDS, ...GROUND_FIELDS].map((f) => f.key);
+
+/** One judges' CSV line (with CRLF) for a valid packet; "" for a malformed one. */
+export function flightCsvRow(r: PacketRecord) {
+  return r.values
+    ? csvLines([[...r.values, ...groundCells(r), new Date(r.rxAt).toISOString()]])
+    : "";
+}
+
 /** The judges' file: one row per valid packet, header row first. */
 export function buildFlightCsv(log: PacketRecord[]) {
-  const header = [...PACKET_FIELDS, ...GROUND_FIELDS].map((f) => f.key);
-  const rows = log.flatMap((r) =>
-    r.values ? [[...r.values, ...groundCells(r), new Date(r.rxAt).toISOString()]] : [],
-  );
-  return csvLines([header, ...rows]);
+  return csvLines([FLIGHT_CSV_HEADER]) + log.map(flightCsvRow).join("");
 }
 
 /**

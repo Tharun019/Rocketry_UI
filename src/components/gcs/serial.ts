@@ -5,6 +5,7 @@ type SerialPortLike = {
   open(options: { baudRate: number }): Promise<void>;
   close(): Promise<void>;
   readable: ReadableStream<Uint8Array> | null;
+  writable: WritableStream<Uint8Array> | null;
 };
 type SerialLike = {
   requestPort(): Promise<SerialPortLike>;
@@ -23,17 +24,25 @@ export type SerialStatus = "unsupported" | "idle" | "connecting" | "open" | "err
 export const BAUD_RATES = [9600, 57600, 115200, 230400, 460800, 921600];
 
 /**
- * Reads text lines from a USB serial port (the ground-station Teensy).
- * `onLine` is called once per non-empty line, without its line ending.
+ * Reads text lines from a USB serial port (the ground-station Teensy) and can
+ * write to it. `onLine` is called once per non-empty line, without its line
+ * ending; `onOpen` once the port is ready, with a function that writes text;
+ * `onClose` when it stops.
  */
-export function useSerialLines(onLine: (line: string) => void) {
+export function useSerialLines(
+  onLine: (line: string) => void,
+  events: { onOpen?: (write: (text: string) => Promise<void>) => void; onClose?: () => void } = {},
+) {
   const [status, setStatus] = useState<SerialStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const port = useRef<SerialPortLike | null>(null);
   const reader = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const closing = useRef(false);
+  const writer = useRef<WritableStreamDefaultWriter<Uint8Array> | null>(null);
   const onLineRef = useRef(onLine);
   onLineRef.current = onLine;
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
 
   // Checked after mount so server render and first client render match.
   useEffect(() => {
@@ -43,8 +52,16 @@ export function useSerialLines(onLine: (line: string) => void) {
   const release = useCallback(async () => {
     const r = reader.current;
     const p = port.current;
+    const w = writer.current;
+    const wasOpen = p !== null;
     reader.current = null;
     port.current = null;
+    writer.current = null;
+    try {
+      w?.releaseLock();
+    } catch {
+      /* already released */
+    }
     try {
       await r?.cancel();
     } catch {
@@ -60,6 +77,7 @@ export function useSerialLines(onLine: (line: string) => void) {
     } catch {
       /* already closed or unplugged */
     }
+    if (wasOpen) eventsRef.current.onClose?.();
   }, []);
 
   const disconnect = useCallback(async () => {
@@ -96,7 +114,14 @@ export function useSerialLines(onLine: (line: string) => void) {
       closing.current = false;
       const r = p.readable.getReader();
       reader.current = r;
+      const w = p.writable?.getWriter() ?? null;
+      writer.current = w;
       setStatus("open");
+      const encoder = new TextEncoder();
+      eventsRef.current.onOpen?.(async (text) => {
+        if (!w || writer.current !== w) throw new Error("Port is not writable");
+        await w.write(encoder.encode(text));
+      });
 
       const decoder = new TextDecoder();
       let buffer = "";

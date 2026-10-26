@@ -1,11 +1,13 @@
 import { useCallback, useRef, useState } from "react";
 import { FIELD_INDEX, type PacketRecord } from "./packets";
 import {
+  ROCKET_STATES,
   TRACK_MAX,
   liveInitialFrame,
   pushSample,
   type FlightState,
   type RocketFrame,
+  type Sample,
   type TrackPoint,
 } from "./telemetry";
 import type { LaunchSite } from "./site";
@@ -38,14 +40,18 @@ export function useLiveTelemetry(site: LaunchSite) {
     const updateRate = times.length > 1 && span > 0 ? (times.length - 1) / span : 0;
 
     // A counter that goes backwards means the flight computer restarted.
-    const count = rec.count ?? 0;
-    const prevCount = counts.current[counts.current.length - 1];
-    if (prevCount !== undefined && count < prevCount) counts.current = [];
-    counts.current = [...counts.current, count].slice(-QUALITY_WINDOW);
-    const expected = count - counts.current[0] + 1;
-    const linkQuality = Math.min(100, (100 * counts.current.length) / Math.max(1, expected));
+    // Without a counter in this packet, link quality keeps its last value.
+    let linkQuality: number | null = null;
+    if (rec.count !== null) {
+      const count = rec.count;
+      const prevCount = counts.current[counts.current.length - 1];
+      if (prevCount !== undefined && count < prevCount) counts.current = [];
+      counts.current = [...counts.current, count].slice(-QUALITY_WINDOW);
+      const expected = count - counts.current[0] + 1;
+      linkQuality = Math.min(100, (100 * counts.current.length) / Math.max(1, expected));
+    }
 
-    setRocket((r) => frameFromPacket(r, values, rec, updateRate, linkQuality));
+    setRocket((r) => frameFromPacket(r, values, rec, updateRate, linkQuality ?? r.linkQuality));
   }, []);
 
   const reset = useCallback(() => {
@@ -64,24 +70,48 @@ function frameFromPacket(
   updateRate: number,
   linkQuality: number,
 ): RocketFrame {
-  const num = (key: string) => Number(values[FIELD_INDEX[key]]);
-  const state = values[FIELD_INDEX.FLIGHT_SOFTWARE_STATE] as FlightState;
-  const t = num("TIME_STAMPING");
-  const altitude = num("ALTITUDE");
-  const velocity = num("VELOCITY");
-  const pressure = num("PRESSURE") / 100; // Pa → hPa
-  const temperature = num("TEMP");
-  const battery = num("VOLTAGE");
-  const accel: [number, number, number] = [num("ACCEL_X"), num("ACCEL_Y"), num("ACCEL_Z")];
-  const gyro: [number, number, number] = [num("GYRO_X"), num("GYRO_Y"), num("GYRO_SPIN_RATE")];
+  // An empty field is "no reading": keep showing the last value instead of 0.
+  const num = (key: string) => {
+    const v = values[FIELD_INDEX[key]];
+    return v === "" || v === undefined ? NaN : Number(v);
+  };
+  const or = (v: number, prev: number) => (Number.isFinite(v) ? v : prev);
+  const parsedState = values[FIELD_INDEX.FLIGHT_SOFTWARE_STATE];
+  // The parser has already turned any known spelling into the UI name; anything else keeps the last state.
+  const state = (ROCKET_STATES as string[]).includes(parsedState)
+    ? (parsedState as FlightState)
+    : r.state;
+  const t = or(num("TIME_STAMPING"), r.t);
+  const altitude = or(num("ALTITUDE"), r.altitude);
+  const velocity = or(num("VELOCITY"), r.velocity);
+  const pressure = or(num("PRESSURE") / 100, r.pressure); // Pa → hPa
+  const temperature = or(num("TEMP"), r.temperature);
+  const battery = or(num("VOLTAGE"), r.battery);
+  const accel: [number, number, number] = [
+    or(num("ACCEL_X"), r.accel[0]),
+    or(num("ACCEL_Y"), r.accel[1]),
+    or(num("ACCEL_Z"), r.accel[2]),
+  ];
+  const gyro: [number, number, number] = [
+    or(num("GYRO_X"), r.gyro[0]),
+    or(num("GYRO_Y"), r.gyro[1]),
+    or(num("GYRO_SPIN_RATE"), r.gyro[2]),
+  ];
 
   const fixLat = num("GNSS_LATITUDE");
   const fixLon = num("GNSS_LONGITUDE");
-  const gnssSats = num("GNSS_SATS");
-  const gpsValid = gnssSats >= MIN_SATS && !(fixLat === 0 && fixLon === 0);
+  const gnssSats = or(num("GNSS_SATS"), 0);
+  const gpsValid =
+    gnssSats >= MIN_SATS &&
+    Number.isFinite(fixLat) &&
+    Number.isFinite(fixLon) &&
+    !(fixLat === 0 && fixLon === 0);
   // Without a fix, hold the last good position so the track does not jump.
   const lat = gpsValid ? fixLat : r.lat;
   const lon = gpsValid ? fixLon : r.lon;
+  // Charts only get a point when that reading actually arrived.
+  const push = (series: Sample[], v: number) =>
+    Number.isFinite(v) ? pushSample(series, t, v) : series;
 
   const point: TrackPoint = { t, lat, lon, alt: altitude };
   const flying = !PAD_STATES.has(state) && !(state === "IMPACT" && r.state === "IMPACT");
@@ -121,12 +151,12 @@ function frameFromPacket(
     lastPacketAt: rec.rxAt,
     updateRate,
     gpsValid,
-    packetCount: num("PACKET_COUNT"),
-    gnssTime: num("GNSS_TIME"),
-    gnssAlt: num("GNSS_ALTITUDE"),
+    packetCount: or(num("PACKET_COUNT"), r.packetCount),
+    gnssTime: or(num("GNSS_TIME"), r.gnssTime),
+    gnssAlt: or(num("GNSS_ALTITUDE"), r.gnssAlt),
     gnssSats,
-    roll: num("ROLL"),
-    pitch: num("PITCH"),
+    roll: or(num("ROLL"), r.roll),
+    pitch: or(num("PITCH"), r.pitch),
     lat,
     lon,
     path: gpsValid
@@ -138,13 +168,13 @@ function frameFromPacket(
     markers,
     stateFixes,
     charts: {
-      altitude: pushSample(r.charts.altitude, t, altitude),
-      velocity: pushSample(r.charts.velocity, t, velocity),
-      acceleration: pushSample(r.charts.acceleration, t, accel[2]),
-      gyro: pushSample(r.charts.gyro, t, gyro[0]),
-      pressure: pushSample(r.charts.pressure, t, pressure),
-      temperature: pushSample(r.charts.temperature, t, temperature),
-      battery: pushSample(r.charts.battery, t, battery),
+      altitude: push(r.charts.altitude, num("ALTITUDE")),
+      velocity: push(r.charts.velocity, num("VELOCITY")),
+      acceleration: push(r.charts.acceleration, num("ACCEL_Z")),
+      gyro: push(r.charts.gyro, num("GYRO_X")),
+      pressure: push(r.charts.pressure, num("PRESSURE") / 100),
+      temperature: push(r.charts.temperature, num("TEMP")),
+      battery: push(r.charts.battery, num("VOLTAGE")),
     },
   };
 }
