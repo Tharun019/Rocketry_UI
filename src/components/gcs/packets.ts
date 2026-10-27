@@ -191,6 +191,9 @@ export function parsePacket(raw: string): { values: string[] } | { error: string
     !Number.isFinite(parseGnssTime(values[FIELD_INDEX.GNSS_TIME]))
   )
     return { error: `GNSS_TIME is not hh:mm:ss: "${values[FIELD_INDEX.GNSS_TIME]}"` };
+  // An accel field with only separators (";;") means "no reading": treat as empty.
+  if (/^[;\s]*$/.test(values[FIELD_INDEX.ACCELEROMETER_DATA]))
+    values[FIELD_INDEX.ACCELEROMETER_DATA] = "";
   const acc = values[FIELD_INDEX.ACCELEROMETER_DATA];
   if (acc !== "" && parseAccel(acc).some((a) => !Number.isFinite(a)))
     return { error: `ACCELEROMETER_DATA is not ax;ay;az: "${acc}"` };

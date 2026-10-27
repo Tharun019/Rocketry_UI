@@ -87,15 +87,17 @@ function GroundStation() {
   // just before it; the rest (#ACK, #CMD_TX, setup echo) are not packets.
   const [baud, setBaud] = useState(115200);
   const [lastLine, setLastLine] = useState<string | null>(null);
-  const serial = useSerialLines((line) => {
+  const serial = useSerialLines((raw) => {
     if (sourceRef.current !== "live") return;
-    setLastLine(line);
-    if (line.trimStart().startsWith("#")) {
-      const link = parseLinkLine(line);
-      if (link && attachLink(link)) live.applyLink(link);
-      return;
-    }
-    live.apply(ingest(line, null, teamId));
+    setLastLine(raw);
+    // Packets never contain '#'. Anything from the first '#' on is a receiver
+    // info line; this also splits "packet#RSSI=..,SNR=.." printed on one line.
+    const hash = raw.indexOf("#");
+    const packet = (hash < 0 ? raw : raw.slice(0, hash)).trim();
+    const info = hash < 0 ? "" : raw.slice(hash).trim();
+    if (packet) live.apply(ingest(packet, null, teamId));
+    const link = info ? parseLinkLine(info) : null;
+    if (link && attachLink(link)) live.applyLink(link);
   });
 
   const changeSource = (next: DataSource) => {
