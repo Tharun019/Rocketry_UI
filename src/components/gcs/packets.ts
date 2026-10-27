@@ -2,45 +2,45 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ROCKET_STATES, type RocketFrame } from "./telemetry";
 
 /**
- * Downlink packet format (IN-SPACe Model Rocketry telemetry, section 6.3).
- * The rocket sends one ASCII line per packet, comma-separated, in exactly this
- * order, terminated by CR. Required fields come first, then OPTIONAL_DATA, then
- * the additional fields allowed by 6.3.B.
+ * Downlink packet format (IN-SPACe Model Rocketry telemetry, section 6.3), exactly as
+ * the rocket firmware (Rocket_TX_Teensy41) sends it and the ground Teensy
+ * (Ground_RX_Teensy41) prints it over USB: 16 comma-separated fields, e.g.
+ *
+ *   2026-IN-SPACe-ROCKETRY-020,125.3,126,1023.4,89234,24.6,7.42,10:31:05,13.0321,77.5891,
+ *   941.2,9,-3.1;0.4;48.2,12.5,ASCENT,VS=85.2;MX=1023;SV=C;I=410
+ *
+ * Measured values may be empty (e.g. no GNSS fix yet). The ground station also prints
+ * info lines starting with '#' (e.g. "#RSSI=-71,SNR=8.5"); those are not packets.
  */
 export type PacketField = {
   key: string;
   label: string;
   unit?: string;
-  /** Decimal places sent, from the spec's resolution column. Omitted for text fields. */
+  /** Decimal places, from the spec's resolution column. Omitted for text fields. */
   dp?: number;
-  /** Spec table row this column belongs to. Additional fields have none. */
+  /** Spec table row this column belongs to. */
   spec?: number;
+  /** Must be present in every packet (the rest may be empty). */
+  required?: boolean;
 };
 
 export const PACKET_FIELDS: PacketField[] = [
-  { key: "TEAM_ID", label: "Team ID", spec: 1 },
-  { key: "TIME_STAMPING", label: "Time since power-on", unit: "s", dp: 2, spec: 2 },
-  { key: "PACKET_COUNT", label: "Packet count", dp: 0, spec: 3 },
+  { key: "TEAM_ID", label: "Team ID", spec: 1, required: true },
+  { key: "TIME_STAMPING", label: "Time since power-on", unit: "s", dp: 1, spec: 2, required: true },
+  { key: "PACKET_COUNT", label: "Packet count", dp: 0, spec: 3, required: true },
   { key: "ALTITUDE", label: "Altitude (AGL)", unit: "m", dp: 1, spec: 4 },
   { key: "PRESSURE", label: "Pressure", unit: "Pa", dp: 0, spec: 5 },
   { key: "TEMP", label: "Temperature", unit: "°C", dp: 1, spec: 6 },
   { key: "VOLTAGE", label: "Bus voltage", unit: "V", dp: 2, spec: 7 },
-  { key: "GNSS_TIME", label: "GNSS time (UTC s of day)", unit: "s", dp: 0, spec: 8 },
+  { key: "GNSS_TIME", label: "GNSS time (UTC)", spec: 8 },
   { key: "GNSS_LATITUDE", label: "GNSS latitude", unit: "°", dp: 4, spec: 9 },
   { key: "GNSS_LONGITUDE", label: "GNSS longitude", unit: "°", dp: 4, spec: 10 },
   { key: "GNSS_ALTITUDE", label: "GNSS altitude (MSL)", unit: "m", dp: 1, spec: 11 },
   { key: "GNSS_SATS", label: "GNSS satellites", dp: 0, spec: 12 },
-  { key: "ACCEL_X", label: "Acceleration X", unit: "m/s²", dp: 2, spec: 13 },
-  { key: "ACCEL_Y", label: "Acceleration Y", unit: "m/s²", dp: 2, spec: 13 },
-  { key: "ACCEL_Z", label: "Acceleration Z", unit: "m/s²", dp: 2, spec: 13 },
-  { key: "ROLL", label: "Roll", unit: "°", dp: 1, spec: 13 },
-  { key: "PITCH", label: "Pitch", unit: "°", dp: 1, spec: 13 },
+  { key: "ACCELEROMETER_DATA", label: "Acceleration X;Y;Z", unit: "m/s²", spec: 13 },
   { key: "GYRO_SPIN_RATE", label: "Gyro spin rate", unit: "°/s", dp: 1, spec: 14 },
-  { key: "FLIGHT_SOFTWARE_STATE", label: "Flight software state", spec: 15 },
+  { key: "FLIGHT_SOFTWARE_STATE", label: "Flight software state", spec: 15, required: true },
   { key: "OPTIONAL_DATA", label: "Optional data", spec: 16 },
-  { key: "VELOCITY", label: "Vertical velocity", unit: "m/s", dp: 1 },
-  { key: "GYRO_X", label: "Angular rate X", unit: "°/s", dp: 1 },
-  { key: "GYRO_Y", label: "Angular rate Y", unit: "°/s", dp: 1 },
 ];
 
 /** Measured by the ground station, appended to every CSV row after the packet fields. */
@@ -52,37 +52,61 @@ export const GROUND_FIELDS: PacketField[] = [
 
 export const FIELD_INDEX = Object.fromEntries(PACKET_FIELDS.map((f, i) => [f.key, i]));
 
-/** Encode a frame as the flight computer would transmit it. */
-export function encodePacket(f: RocketFrame, teamId: string, optional = ""): string {
-  const values: Record<string, string | number> = {
-    TEAM_ID: teamId,
-    TIME_STAMPING: f.t,
-    PACKET_COUNT: f.packetCount,
-    ALTITUDE: f.altitude,
-    PRESSURE: f.pressure * 100,
-    TEMP: f.temperature,
-    VOLTAGE: f.battery,
-    GNSS_TIME: f.gnssTime,
-    GNSS_LATITUDE: f.lat,
-    GNSS_LONGITUDE: f.lon,
-    GNSS_ALTITUDE: f.gnssAlt,
-    GNSS_SATS: f.gnssSats,
-    ACCEL_X: f.accel[0],
-    ACCEL_Y: f.accel[1],
-    ACCEL_Z: f.accel[2],
-    ROLL: f.roll,
-    PITCH: f.pitch,
-    GYRO_SPIN_RATE: f.gyro[2],
-    FLIGHT_SOFTWARE_STATE: f.state,
-    OPTIONAL_DATA: optional,
-    VELOCITY: f.velocity,
-    GYRO_X: f.gyro[0],
-    GYRO_Y: f.gyro[1],
-  };
-  return PACKET_FIELDS.map((p) => {
-    const v = values[p.key];
-    return typeof v === "number" && p.dp !== undefined ? v.toFixed(p.dp) : String(v);
-  }).join(",");
+/** UTC seconds of day -> "hh:mm:ss". */
+export function formatGnssTime(sec: number): string {
+  const s = Math.max(0, Math.floor(sec)) % 86400;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+}
+
+/** "hh:mm:ss" (or plain seconds) -> UTC seconds of day; NaN when empty or invalid. */
+export function parseGnssTime(v: string | undefined): number {
+  if (!v) return NaN;
+  const m = /^(\d{1,2}):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(v);
+  if (m) return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+  return Number.isFinite(Number(v)) ? Number(v) : NaN;
+}
+
+/** "ax;ay;az" -> numbers (NaN for missing parts). */
+export function parseAccel(v: string | undefined): [number, number, number] {
+  const parts = (v ?? "").split(";");
+  const n = (i: number) =>
+    parts[i] !== undefined && parts[i].trim() !== "" ? Number(parts[i]) : NaN;
+  return [n(0), n(1), n(2)];
+}
+
+/** OPTIONAL_DATA "KEY=val;KEY=val" -> map. */
+export function parseOptional(v: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const kv of (v ?? "").split(";")) {
+    const i = kv.indexOf("=");
+    if (i > 0) out[kv.slice(0, i).trim()] = kv.slice(i + 1).trim();
+  }
+  return out;
+}
+
+/** Encode a frame as the flight computer would transmit it (simulator). */
+export function encodePacket(f: RocketFrame, teamId: string): string {
+  const fx = (v: number, dp: number) => (Number.isFinite(v) ? v.toFixed(dp) : "");
+  const servo = ROCKET_STATES.indexOf(f.state) < ROCKET_STATES.indexOf("APOGEE") ? "C" : "O";
+  return [
+    teamId,
+    fx(f.t, 1),
+    String(f.packetCount),
+    fx(f.altitude, 1),
+    fx(f.pressure * 100, 0),
+    fx(f.temperature, 1),
+    fx(f.battery, 2),
+    formatGnssTime(f.gnssTime),
+    fx(f.lat, 4),
+    fx(f.lon, 4),
+    fx(f.gnssAlt, 1),
+    String(f.gnssSats),
+    f.accel.map((a) => fx(a, 1)).join(";"),
+    fx(f.gyro[2], 1),
+    f.state,
+    `VS=${fx(f.velocity, 1)};SV=${servo}`,
+  ].join(",");
 }
 
 /** Simulator only: what the radio hands over, including the occasional corrupted line. */
@@ -133,39 +157,50 @@ const EMPTY_STATS: PacketStats = {
   lastRxAt: 0,
 };
 
-/**
- * A live receiver line is the packet, optionally followed by the ground station's
- * own RSSI and SNR as two extra fields.
- */
-export function splitGroundLink(raw: string): { packet: string } & GroundLink {
-  const parts = raw.replace(/[\r\n]+$/, "").split(",");
-  if (parts.length === PACKET_FIELDS.length + 2) {
-    const [rssi, snr] = parts.slice(PACKET_FIELDS.length).map((v) => v.trim());
-    if (rssi !== "" && snr !== "" && Number.isFinite(Number(rssi)) && Number.isFinite(Number(snr)))
-      return {
-        packet: parts.slice(0, PACKET_FIELDS.length).join(","),
-        rssi: Number(rssi),
-        snr: Number(snr),
-      };
-  }
-  return { packet: raw, rssi: null, snr: null };
+/** Ground-station info line "#RSSI=-71,SNR=8.5" -> figures; null for any other line. */
+export function parseLinkLine(line: string): GroundLink | null {
+  const m = /^#RSSI=(-?\d+(?:\.\d+)?),SNR=(-?\d+(?:\.\d+)?)/.exec(line.trim());
+  return m ? { rssi: Number(m[1]), snr: Number(m[2]) } : null;
 }
 
+/**
+ * Split and check one packet line. Tolerant on purpose: empty measured values are
+ * allowed (no GNSS fix, sensor missing), a trailing "*HH" checksum is dropped, and
+ * the state may be a name or its number (0 = BOOT ... 9 = IMPACT).
+ */
 export function parsePacket(raw: string): { values: string[] } | { error: string } {
-  const values = raw
-    .replace(/[\r\n]+$/, "")
-    .split(",")
-    .map((v) => v.trim());
+  let line = raw.replace(/[\r\n]+$/, "").trim();
+  const star = line.lastIndexOf("*");
+  if (star > 0 && /^\*[0-9A-Fa-f]{2}$/.test(line.slice(star))) line = line.slice(0, star);
+  const values = line.split(",").map((v) => v.trim());
   if (values.length !== PACKET_FIELDS.length)
     return { error: `Expected ${PACKET_FIELDS.length} fields, got ${values.length}` };
+
   for (let i = 0; i < PACKET_FIELDS.length; i++) {
     const f = PACKET_FIELDS[i];
-    if (f.dp !== undefined && (values[i] === "" || !Number.isFinite(Number(values[i]))))
-      return { error: `${f.key} is not a number: "${values[i]}"` };
+    const v = values[i];
+    if (v === "") {
+      if (f.required) return { error: `${f.key} is empty` };
+      continue;
+    }
+    if (f.dp !== undefined && !Number.isFinite(Number(v)))
+      return { error: `${f.key} is not a number: "${v}"` };
   }
-  const state = values[FIELD_INDEX.FLIGHT_SOFTWARE_STATE];
-  if (!(ROCKET_STATES as string[]).includes(state))
-    return { error: `Unknown flight software state "${state}"` };
+  if (
+    values[FIELD_INDEX.GNSS_TIME] !== "" &&
+    !Number.isFinite(parseGnssTime(values[FIELD_INDEX.GNSS_TIME]))
+  )
+    return { error: `GNSS_TIME is not hh:mm:ss: "${values[FIELD_INDEX.GNSS_TIME]}"` };
+  const acc = values[FIELD_INDEX.ACCELEROMETER_DATA];
+  if (acc !== "" && parseAccel(acc).some((a) => !Number.isFinite(a)))
+    return { error: `ACCELEROMETER_DATA is not ax;ay;az: "${acc}"` };
+
+  const si = FIELD_INDEX.FLIGHT_SOFTWARE_STATE;
+  const state = values[si].toUpperCase();
+  if (/^\d+$/.test(state) && ROCKET_STATES[Number(state)])
+    values[si] = ROCKET_STATES[Number(state)];
+  else if ((ROCKET_STATES as string[]).includes(state)) values[si] = state;
+  else return { error: `Unknown flight software state "${values[si]}"` };
   return { values };
 }
 
@@ -185,14 +220,14 @@ export function usePacketLog() {
   const [stats, setStats] = useState<PacketStats>(EMPTY_STATS);
 
   /**
-   * Log one received line. Pass `link` when the radio reports RSSI/SNR separately
-   * (the simulator); pass null to read them from the end of the line, if present.
+   * Log one received packet line. Pass `link` when RSSI/SNR are already known (the
+   * simulator); live figures arrive on the next "#RSSI" line, see `attachLink`.
    */
   const ingest = useCallback(
     (raw: string, link: GroundLink | null, expectedTeamId: string): PacketRecord => {
       const rxAt = Date.now();
-      const split = link ? { packet: raw, ...link } : splitGroundLink(raw);
-      const parsed = parsePacket(split.packet);
+      const split = { rssi: link?.rssi ?? null, snr: link?.snr ?? null };
+      const parsed = parsePacket(raw);
       const s = { ...statsRef.current, received: statsRef.current.received + 1, lastRxAt: rxAt };
       const issues: PacketIssue[] = [];
       let values: string[] | null = null;
@@ -251,6 +286,15 @@ export function usePacketLog() {
     [],
   );
 
+  /** Attach the ground station's RSSI/SNR (printed on the line after a packet) to the latest packet. */
+  const attachLink = useCallback((link: GroundLink): PacketRecord | null => {
+    const last = log.current[log.current.length - 1];
+    if (!last || last.rssi !== null) return null;
+    last.rssi = link.rssi;
+    last.snr = link.snr;
+    return last;
+  }, []);
+
   /** Start a fresh session (e.g. when switching between simulated and live data). */
   const reset = useCallback(() => {
     log.current.length = 0;
@@ -259,7 +303,7 @@ export function usePacketLog() {
     setStats(EMPTY_STATS);
   }, []);
 
-  return { log: log.current, stats, ingest, reset };
+  return { log: log.current, stats, ingest, attachLink, reset };
 }
 
 // ---- Team ID ---------------------------------------------------------------

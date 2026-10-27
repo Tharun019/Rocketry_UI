@@ -7,7 +7,7 @@ import { PacketsView } from "@/components/gcs/PacketsView";
 import { GroundStationPanel, type DataSource } from "@/components/gcs/GroundStationPanel";
 import { useLiveTelemetry } from "@/components/gcs/live";
 import { useSerialLines } from "@/components/gcs/serial";
-import { simulateDownlink, usePacketLog, useTeamId } from "@/components/gcs/packets";
+import { parseLinkLine, simulateDownlink, usePacketLog, useTeamId } from "@/components/gcs/packets";
 import { TrajectoryPanel } from "@/components/gcs/TrajectoryPanel";
 import {
   AlertsPanel,
@@ -67,7 +67,13 @@ function GroundStation() {
   // Every telemetry frame arrives as one ASCII packet line; it is parsed and
   // logged like a real receiver would, independent of which tab is open.
   const { teamId, setTeamId } = useTeamId();
-  const { log: packetLog, stats: packetStats, ingest, reset: resetPackets } = usePacketLog();
+  const {
+    log: packetLog,
+    stats: packetStats,
+    ingest,
+    attachLink,
+    reset: resetPackets,
+  } = usePacketLog();
   useEffect(() => {
     if (sourceRef.current !== "sim" || sim.rocket.packetCount === 0) return;
     const f = sim.rocket;
@@ -76,12 +82,19 @@ function GroundStation() {
 
   // ---- Live downlink over USB --------------------------------------------
   // The ground-station Teensy prints one decoded packet per line; each line is
-  // logged like a simulated one and, when valid, drives every panel.
+  // logged like a simulated one and, when valid, drives every panel. Lines that
+  // start with '#' are its info lines: "#RSSI=..,SNR=.." belongs to the packet
+  // just before it; the rest (#ACK, #CMD_TX, setup echo) are not packets.
   const [baud, setBaud] = useState(115200);
   const [lastLine, setLastLine] = useState<string | null>(null);
   const serial = useSerialLines((line) => {
     if (sourceRef.current !== "live") return;
     setLastLine(line);
+    if (line.trimStart().startsWith("#")) {
+      const link = parseLinkLine(line);
+      if (link && attachLink(link)) live.applyLink(link);
+      return;
+    }
     live.apply(ingest(line, null, teamId));
   });
 

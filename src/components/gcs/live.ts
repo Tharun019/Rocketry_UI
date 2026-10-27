@@ -1,5 +1,12 @@
 import { useCallback, useRef, useState } from "react";
-import { FIELD_INDEX, type PacketRecord } from "./packets";
+import {
+  FIELD_INDEX,
+  parseAccel,
+  parseGnssTime,
+  parseOptional,
+  type GroundLink,
+  type PacketRecord,
+} from "./packets";
 import {
   TRACK_MAX,
   liveInitialFrame,
@@ -48,13 +55,18 @@ export function useLiveTelemetry(site: LaunchSite) {
     setRocket((r) => frameFromPacket(r, values, rec, updateRate, linkQuality));
   }, []);
 
+  /** RSSI/SNR arrive on the ground station's line after the packet. */
+  const applyLink = useCallback((link: GroundLink) => {
+    setRocket((r) => ({ ...r, rssi: link.rssi, snr: link.snr }));
+  }, []);
+
   const reset = useCallback(() => {
     rxTimes.current = [];
     counts.current = [];
     setRocket(liveInitialFrame(site));
   }, [site]);
 
-  return { rocket, apply, reset };
+  return { rocket, apply, applyLink, reset };
 }
 
 function frameFromPacket(
@@ -64,21 +76,38 @@ function frameFromPacket(
   updateRate: number,
   linkQuality: number,
 ): RocketFrame {
-  const num = (key: string) => Number(values[FIELD_INDEX[key]]);
+  // Empty field -> NaN; `keep` holds the previous value so a missing reading
+  // does not drop a card or chart to zero.
+  const num = (key: string) => {
+    const v = values[FIELD_INDEX[key]];
+    return v === undefined || v === "" ? NaN : Number(v);
+  };
+  const keep = (v: number, prev: number) => (Number.isFinite(v) ? v : prev);
+  const opt = parseOptional(values[FIELD_INDEX.OPTIONAL_DATA]);
   const state = values[FIELD_INDEX.FLIGHT_SOFTWARE_STATE] as FlightState;
   const t = num("TIME_STAMPING");
-  const altitude = num("ALTITUDE");
-  const velocity = num("VELOCITY");
-  const pressure = num("PRESSURE") / 100; // Pa → hPa
-  const temperature = num("TEMP");
-  const battery = num("VOLTAGE");
-  const accel: [number, number, number] = [num("ACCEL_X"), num("ACCEL_Y"), num("ACCEL_Z")];
-  const gyro: [number, number, number] = [num("GYRO_X"), num("GYRO_Y"), num("GYRO_SPIN_RATE")];
+  const altitude = keep(num("ALTITUDE"), r.altitude);
+  const velocity = keep(opt.VS !== undefined && opt.VS !== "" ? Number(opt.VS) : NaN, r.velocity);
+  const pressure = keep(num("PRESSURE") / 100, r.pressure); // Pa → hPa
+  const temperature = keep(num("TEMP"), r.temperature);
+  const battery = keep(num("VOLTAGE"), r.battery);
+  const a = parseAccel(values[FIELD_INDEX.ACCELEROMETER_DATA]);
+  const accel: [number, number, number] = [
+    keep(a[0], r.accel[0]),
+    keep(a[1], r.accel[1]),
+    keep(a[2], r.accel[2]),
+  ];
+  // The rocket sends only the spin rate (about its long axis); X/Y are not measured.
+  const gyro: [number, number, number] = [NaN, NaN, keep(num("GYRO_SPIN_RATE"), r.gyro[2])];
 
   const fixLat = num("GNSS_LATITUDE");
   const fixLon = num("GNSS_LONGITUDE");
-  const gnssSats = num("GNSS_SATS");
-  const gpsValid = gnssSats >= MIN_SATS && !(fixLat === 0 && fixLon === 0);
+  const gnssSats = keep(num("GNSS_SATS"), 0);
+  const gpsValid =
+    Number.isFinite(fixLat) &&
+    Number.isFinite(fixLon) &&
+    gnssSats >= MIN_SATS &&
+    !(fixLat === 0 && fixLon === 0);
   // Without a fix, hold the last good position so the track does not jump.
   const lat = gpsValid ? fixLat : r.lat;
   const lon = gpsValid ? fixLon : r.lon;
@@ -115,18 +144,16 @@ function frameFromPacket(
     accel,
     gyro,
     battery,
-    rssi: rec.rssi,
-    snr: rec.snr,
+    rssi: rec.rssi ?? r.rssi,
+    snr: rec.snr ?? r.snr,
     linkQuality,
     lastPacketAt: rec.rxAt,
     updateRate,
     gpsValid,
     packetCount: num("PACKET_COUNT"),
-    gnssTime: num("GNSS_TIME"),
-    gnssAlt: num("GNSS_ALTITUDE"),
+    gnssTime: keep(parseGnssTime(values[FIELD_INDEX.GNSS_TIME]), r.gnssTime),
+    gnssAlt: keep(num("GNSS_ALTITUDE"), r.gnssAlt),
     gnssSats,
-    roll: num("ROLL"),
-    pitch: num("PITCH"),
     lat,
     lon,
     path: gpsValid
@@ -141,7 +168,7 @@ function frameFromPacket(
       altitude: pushSample(r.charts.altitude, t, altitude),
       velocity: pushSample(r.charts.velocity, t, velocity),
       acceleration: pushSample(r.charts.acceleration, t, accel[2]),
-      gyro: pushSample(r.charts.gyro, t, gyro[0]),
+      gyro: pushSample(r.charts.gyro, t, gyro[2]),
       pressure: pushSample(r.charts.pressure, t, pressure),
       temperature: pushSample(r.charts.temperature, t, temperature),
       battery: pushSample(r.charts.battery, t, battery),

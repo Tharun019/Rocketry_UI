@@ -118,8 +118,9 @@ export function GroundStationPanel({
           </div>
 
           <p className="text-[11px] text-subtle leading-relaxed">
-            One packet per line: {PACKET_FIELDS.length} comma-separated fields in the IN-SPACe
-            order, optionally followed by RSSI and SNR.
+            One packet per line: {PACKET_FIELDS.length} comma-separated fields in the IN-SPACe order
+            (empty values allowed). Lines starting with # are ground-station info; RSSI/SNR are read
+            from them. Close the Arduino Serial Monitor first: only one program can open the port.
           </p>
         </>
       )}

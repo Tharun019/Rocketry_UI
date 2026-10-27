@@ -14,7 +14,7 @@ type Props = {
 
 export function RocketDashboard({ data, onCommand }: Props) {
   const xyz = (v: [number, number, number], d: number) =>
-    v.map((n, i) => ({ k: "XYZ"[i], v: n.toFixed(d) }));
+    v.map((n, i) => ({ k: "XYZ"[i], v: Number.isFinite(n) ? n.toFixed(d) : "—" }));
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-4">
@@ -75,7 +75,7 @@ export function RocketDashboard({ data, onCommand }: Props) {
               color: SERIES,
               data: data.charts.acceleration,
             },
-            { key: "gyro", label: "Gyro X", unit: "°/s", color: SERIES, data: data.charts.gyro },
+            { key: "gyro", label: "Spin rate", unit: "°/s", color: SERIES, data: data.charts.gyro },
             {
               key: "pres",
               label: "Pressure",
