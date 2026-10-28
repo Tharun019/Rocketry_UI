@@ -218,12 +218,13 @@ function GroundStation() {
     if (rocket.linkQuality < 62 || (rocket.rssi !== null && rocket.rssi < -100))
       list.push({ type: "COMMUNICATION LOST", level: "danger", source: "ROCKET" });
     if (rocketStale) list.push({ type: "TELEMETRY TIMEOUT", level: "danger", source: "ROCKET" });
-    if (rocket.battery < 11.2)
+    // 2S Li-ion: 8.4 V full, 7.4 V nominal.
+    if (rocket.battery < 7.0)
       list.push({
         type: "LOW BATTERY",
         level: "warn",
         source: "ROCKET",
-        detail: `${rocket.battery.toFixed(2)} V`,
+        detail: `${rocket.battery.toFixed(2)} V (below 7.0 V)`,
       });
     if (rocket.temperature > 45)
       list.push({

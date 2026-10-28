@@ -40,7 +40,7 @@ export function RocketDashboard({ data, onCommand }: Props) {
               label="Battery"
               value={data.battery.toFixed(2)}
               unit="V"
-              tone={data.battery < 11.2 ? "warn" : "ok"}
+              tone={data.battery < 7.0 ? "warn" : "ok"}
             />
             <TelemetryCard
               label="RSSI"

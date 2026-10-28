@@ -34,10 +34,22 @@ export function useLiveTelemetry(site: LaunchSite) {
   const [rocket, setRocket] = useState<RocketFrame>(() => liveInitialFrame(site));
   const rxTimes = useRef<number[]>([]);
   const counts = useRef<number[]>([]);
+  const lastAlt = useRef<{ t: number; alt: number } | null>(null);
 
   const apply = useCallback((rec: PacketRecord) => {
     const values = rec.values;
     if (!values) return;
+
+    // Vertical speed from successive altitude readings, used when the packet has no VS=.
+    const t = Number(values[FIELD_INDEX.TIME_STAMPING]);
+    const altRaw = values[FIELD_INDEX.ALTITUDE];
+    const alt = altRaw === "" ? NaN : Number(altRaw);
+    let climb = NaN;
+    if (Number.isFinite(t) && Number.isFinite(alt)) {
+      const prev = lastAlt.current;
+      if (prev && t > prev.t) climb = (alt - prev.alt) / (t - prev.t);
+      lastAlt.current = { t, alt };
+    }
 
     rxTimes.current = [...rxTimes.current.filter((t) => rec.rxAt - t < RATE_WINDOW_MS), rec.rxAt];
     const times = rxTimes.current;
@@ -52,7 +64,7 @@ export function useLiveTelemetry(site: LaunchSite) {
     const expected = count - counts.current[0] + 1;
     const linkQuality = Math.min(100, (100 * counts.current.length) / Math.max(1, expected));
 
-    setRocket((r) => frameFromPacket(r, values, rec, updateRate, linkQuality));
+    setRocket((r) => frameFromPacket(r, values, rec, updateRate, linkQuality, climb));
   }, []);
 
   /** RSSI/SNR arrive on the ground station's line after the packet. */
@@ -63,6 +75,7 @@ export function useLiveTelemetry(site: LaunchSite) {
   const reset = useCallback(() => {
     rxTimes.current = [];
     counts.current = [];
+    lastAlt.current = null;
     setRocket(liveInitialFrame(site));
   }, [site]);
 
@@ -75,6 +88,8 @@ function frameFromPacket(
   rec: PacketRecord,
   updateRate: number,
   linkQuality: number,
+  /** Altitude change per second since the previous reading; NaN when unknown. */
+  climb: number,
 ): RocketFrame {
   // Empty field -> NaN; `keep` holds the previous value so a missing reading
   // does not drop a card or chart to zero.
@@ -87,7 +102,7 @@ function frameFromPacket(
   const state = values[FIELD_INDEX.FLIGHT_SOFTWARE_STATE] as FlightState;
   const t = num("TIME_STAMPING");
   const altitude = keep(num("ALTITUDE"), r.altitude);
-  const velocity = keep(opt.VS !== undefined && opt.VS !== "" ? Number(opt.VS) : NaN, r.velocity);
+  const velocity = keep(opt.VS !== undefined && opt.VS !== "" ? Number(opt.VS) : climb, r.velocity);
   const pressure = keep(num("PRESSURE") / 100, r.pressure); // Pa → hPa
   const temperature = keep(num("TEMP"), r.temperature);
   const battery = keep(num("VOLTAGE"), r.battery);
