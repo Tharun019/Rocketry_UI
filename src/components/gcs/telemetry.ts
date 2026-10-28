@@ -124,7 +124,7 @@ function initialFrame(site: LaunchSite): RocketFrame {
     temperature: 24,
     accel: [0, 0, 9.81],
     gyro: [0, 0, 0],
-    battery: 12.4,
+    battery: 8.4,
     rssi: -62,
     snr: 9.5,
     linkQuality: 98,
@@ -272,7 +272,8 @@ export function useTelemetry(site: LaunchSite, enabled = true) {
           if (state === "IMPACT") markers.landing = point;
         }
 
-        const battery = Math.max(10.8, r.battery - 0.0008);
+        // 2S Li-ion: 8.4 V full down to ~6.8 V by impact (t = 90 s); LOW BATTERY below 7.0 V.
+        const battery = 8.4 - 1.6 * Math.min(1, t / 90);
         const gpsValid = Math.random() > 0.02;
         // ~1.5% of packets never reach the ground station.
         const packetCount = r.packetCount + (Math.random() < 0.015 ? 2 : 1);
