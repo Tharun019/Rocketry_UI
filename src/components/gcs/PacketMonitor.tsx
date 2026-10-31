@@ -1,6 +1,6 @@
 import { Panel, Stat, StatusPill, TONE_COLOR, type Tone } from "./ui";
 
-type LinkStatus = "CONNECTED" | "DEGRADED" | "LOST";
+export type LinkStatus = "CONNECTED" | "DEGRADED" | "LOST" | "STANDBY" | "PAUSED";
 
 type Props = {
   tx: number;
@@ -16,6 +16,8 @@ const STATUS_TONE: Record<LinkStatus, Tone> = {
   CONNECTED: "ok",
   DEGRADED: "warn",
   LOST: "danger",
+  STANDBY: "neutral",
+  PAUSED: "neutral",
 };
 
 export function PacketMonitor({ tx, rx, loss, snr, lastPacket, rateHz, status }: Props) {

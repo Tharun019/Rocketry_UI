@@ -5,10 +5,12 @@ import {
   parseGnssTime,
   parseOptional,
   type GroundLink,
+  type LinkState,
   type PacketRecord,
 } from "./packets";
 import {
   TRACK_MAX,
+  linkOffFrame,
   liveInitialFrame,
   pushSample,
   type FlightState,
@@ -27,8 +29,9 @@ const QUALITY_WINDOW = 50;
 const MIN_SATS = 4;
 
 /**
- * Telemetry built from decoded packets received over USB. Feed it every logged
- * record; malformed lines are ignored here (they still show in the Packets tab).
+ * Telemetry built from decoded packets, whatever their source. Feed it every logged
+ * record; malformed lines and packets received while the link is not ON are ignored
+ * here (they still reach the log). Call `enterLink` when the link state changes.
  */
 export function useLiveTelemetry(site: LaunchSite) {
   const [rocket, setRocket] = useState<RocketFrame>(() => liveInitialFrame(site));
@@ -38,7 +41,7 @@ export function useLiveTelemetry(site: LaunchSite) {
 
   const apply = useCallback((rec: PacketRecord) => {
     const values = rec.values;
-    if (!values) return;
+    if (!values || rec.link !== "ON") return;
 
     // Vertical speed from successive altitude readings, used when the packet has no VS=.
     const t = Number(values[FIELD_INDEX.TIME_STAMPING]);
@@ -79,7 +82,16 @@ export function useLiveTelemetry(site: LaunchSite) {
     setRocket(liveInitialFrame(site));
   }, [site]);
 
-  return { rocket, apply, applyLink, reset };
+  /** ON and STANDBY start from nothing; OFF zeroes the cards and freezes the rest. */
+  const enterLink = useCallback(
+    (next: LinkState) => {
+      if (next === "OFF") setRocket((r) => linkOffFrame(r, site));
+      else reset();
+    },
+    [site, reset],
+  );
+
+  return { rocket, apply, applyLink, reset, enterLink };
 }
 
 function frameFromPacket(

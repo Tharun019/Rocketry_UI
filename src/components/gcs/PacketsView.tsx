@@ -9,6 +9,8 @@ import {
   fieldValue,
   flightFileName,
   groundCells,
+  linkRecords,
+  stateSummaryRowCount,
   type IssueKind,
   type PacketRecord,
   type PacketStats,
@@ -24,6 +26,9 @@ type Props = {
 };
 
 const SHOWN = 250;
+
+/** Packets received with the LoRa link OFF; apart from the red/amber issue colours. */
+const LINK_OFF_COLOR = "oklch(0.72 0.15 290)";
 
 const ISSUE_TONE: Record<IssueKind, Tone> = {
   MALFORMED: "danger",
@@ -64,17 +69,20 @@ export function PacketsView({ log, stats, teamId, onTeamIdChange }: Props) {
     const out: PacketRecord[] = [];
     for (let i = end - 1; i >= 0 && out.length < SHOWN; i--) {
       const r = log[i];
-      if (filter === "all" || r.issues.length) out.push(r);
+      if (r.link !== "STANDBY" && (filter === "all" || r.issues.length)) out.push(r);
     }
     return out;
     // stats.received changes on every packet; the log array itself is mutated in place.
   }, [log, end, filter, stats.received]); // eslint-disable-line react-hooks/exhaustive-deps
 
   let recent = 0;
-  for (let i = log.length - 1; i >= 0 && log[i].rxAt > now - 5000; i--) recent++;
+  for (let i = log.length - 1; i >= 0 && log[i].rxAt > now - 5000; i--)
+    if (log[i].link !== "STANDBY") recent++;
   const rateHz = recent / 5;
 
-  const inspected = selected !== null ? log[selected - 1] : log[end - 1];
+  let latest = end - 1;
+  while (latest >= 0 && log[latest].link === "STANDBY") latest--;
+  const inspected = selected !== null ? log[selected - 1] : log[latest];
   const sent = stats.valid + stats.missed;
   const lossPct = sent > 0 ? (stats.missed / sent) * 100 : 0;
   const ageS = stats.lastRxAt ? (now - stats.lastRxAt) / 1000 : null;
@@ -171,6 +179,12 @@ export function PacketsView({ log, stats, teamId, onTeamIdChange }: Props) {
           }
           bodyClassName="flex flex-col gap-1.5"
         >
+          {stats.rows.OFF > 0 ? (
+            <p className="text-xs leading-relaxed" style={{ color: LINK_OFF_COLOR }}>
+              Highlighted packets were received while LoRa link was OFF — real packets from the
+              rocket, not shown on the dashboard.
+            </p>
+          ) : null}
           <div className="overflow-x-auto scroll-quiet">
             <div className="min-w-[720px]">
               <div className="grid grid-cols-[92px_60px_64px_150px_64px_minmax(0,1fr)] gap-3 px-3 pb-1.5 eyebrow">
@@ -190,15 +204,18 @@ export function PacketsView({ log, stats, teamId, onTeamIdChange }: Props) {
                   rows.map((r) => {
                     const tone = recordTone(r);
                     const isSel = inspected?.seq === r.seq;
+                    const off = r.link === "OFF";
                     return (
                       <button
                         key={r.seq}
                         type="button"
                         onClick={() => setSelected(isSel && selected !== null ? null : r.seq)}
+                        data-link={r.link}
                         className={cn(
                           "w-full text-left grid grid-cols-[92px_60px_64px_150px_64px_minmax(0,1fr)] gap-3 items-center px-3 py-1 hover:bg-hover/50",
                           isSel && "bg-hover",
                         )}
+                        style={off ? { boxShadow: `inset 2px 0 0 ${LINK_OFF_COLOR}` } : undefined}
                       >
                         <span className="text-subtle">{rxTime(r.rxAt)}</span>
                         <span className="text-right text-foreground">{r.count ?? "—"}</span>
@@ -206,10 +223,20 @@ export function PacketsView({ log, stats, teamId, onTeamIdChange }: Props) {
                         <span className="truncate text-muted-foreground">
                           {fieldValue(r, "FLIGHT_SOFTWARE_STATE") ?? "—"}
                         </span>
-                        <span className="text-[10.5px]" style={{ color: TONE_COLOR[tone] }}>
-                          {r.issues[0]?.kind.replace("_", " ") ?? "OK"}
+                        <span
+                          className="text-[10.5px]"
+                          style={{
+                            color: off && !r.issues.length ? LINK_OFF_COLOR : TONE_COLOR[tone],
+                          }}
+                        >
+                          {r.issues[0]?.kind.replace("_", " ") ?? (off ? "LINK OFF" : "OK")}
                         </span>
-                        <span className="truncate text-subtle">{r.raw}</span>
+                        <span
+                          className="truncate text-subtle"
+                          style={off ? { color: LINK_OFF_COLOR } : undefined}
+                        >
+                          {r.raw}
+                        </span>
                       </button>
                     );
                   })
@@ -251,7 +278,42 @@ function ExportPanel({
   onTeamIdChange: (id: string) => void;
   placeholderId: boolean;
 }) {
-  const name = flightFileName(teamId);
+  const onRows = stats.rows.ON;
+  // The log is mutated in place; the ON row count says when the summary can have changed.
+  const summaryRows = useMemo(
+    () => stateSummaryRowCount(linkRecords(log, "ON")),
+    [log, onRows], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const exports = [
+    {
+      label: "Flight CSV",
+      suffix: "",
+      icon: Download,
+      rows: onRows,
+      build: () => buildFlightCsv(linkRecords(log, "ON")),
+    },
+    {
+      label: "State summary",
+      suffix: "_StateSummary",
+      icon: ListOrdered,
+      rows: summaryRows,
+      build: () => buildStateSummaryCsv(linkRecords(log, "ON")),
+    },
+    {
+      label: "Link-off packets",
+      suffix: "_LinkOff",
+      icon: Download,
+      rows: stats.rows.OFF,
+      build: () => buildFlightCsv(linkRecords(log, "OFF")),
+    },
+    {
+      label: "Standby packets",
+      suffix: "_Standby",
+      icon: Download,
+      rows: stats.rows.STANDBY,
+      build: () => buildFlightCsv(linkRecords(log, "STANDBY")),
+    },
+  ];
   return (
     <Panel
       title="Flight data export"
@@ -273,36 +335,32 @@ function ExportPanel({
         ) : null}
       </label>
       <div className="well px-3 py-2.5 flex flex-col gap-1">
-        <span className="eyebrow">File</span>
-        <span className="readout text-[13px] break-all">{name}</span>
+        <span className="eyebrow">Judges' file</span>
+        <span className="readout text-[13px] break-all">{flightFileName(teamId)}</span>
         <span className="text-[11px] text-subtle">
-          {stats.valid.toLocaleString()} data rows · {PACKET_FIELDS.length + GROUND_FIELDS.length}{" "}
+          {stats.rows.ON.toLocaleString()} data rows · {PACKET_FIELDS.length + GROUND_FIELDS.length}{" "}
           columns · header row · CRLF
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Button
-          size="md"
-          variant="primary"
-          disabled={stats.valid === 0}
-          onClick={() => downloadText(name, buildFlightCsv(log))}
-        >
-          <Download className="h-3.5 w-3.5" /> Export CSV
-        </Button>
-        <Button
-          size="md"
-          disabled={stats.valid === 0}
-          onClick={() =>
-            downloadText(flightFileName(teamId, "_state_summary"), buildStateSummaryCsv(log))
-          }
-        >
-          <ListOrdered className="h-3.5 w-3.5" /> State summary
-        </Button>
+      <div className="flex flex-col gap-2">
+        {exports.map((e, i) => (
+          <Button
+            key={e.label}
+            size="md"
+            variant={i === 0 ? "primary" : undefined}
+            className="w-full"
+            disabled={e.rows === 0}
+            onClick={() => downloadText(flightFileName(teamId, e.suffix), e.build())}
+          >
+            <e.icon className="h-3.5 w-3.5" /> {e.label} · {e.rows.toLocaleString()} rows
+          </Button>
+        ))}
       </div>
       <p className="text-[11px] text-subtle leading-relaxed">
-        Export CSV holds every valid packet in spec field order, followed by the ground-station
-        RSSI, SNR and receive time. State summary holds only the first 5 and last 5 readings of each
-        flight state, in the order the states were reached.
+        Flight CSV holds every valid packet received while the LoRa link was ON, in spec field
+        order, followed by the ground-station RSSI, SNR and receive time. State summary holds the
+        first 5 and last 5 of those readings per flight state. Link-off and Standby hold the packets
+        received outside the ON window, in the same columns.
       </p>
     </Panel>
   );

@@ -2,12 +2,18 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Header, type MissionEvent, type SystemStatus } from "@/components/gcs/Header";
 import { RocketDashboard } from "@/components/gcs/RocketDashboard";
-import { PacketMonitor } from "@/components/gcs/PacketMonitor";
+import { PacketMonitor, type LinkStatus } from "@/components/gcs/PacketMonitor";
 import { PacketsView } from "@/components/gcs/PacketsView";
 import { GroundStationPanel, type DataSource } from "@/components/gcs/GroundStationPanel";
 import { useLiveTelemetry } from "@/components/gcs/live";
 import { useSerialLines } from "@/components/gcs/serial";
-import { parseLinkLine, simulateDownlink, usePacketLog, useTeamId } from "@/components/gcs/packets";
+import {
+  parseLinkLine,
+  simulateDownlink,
+  usePacketLog,
+  useTeamId,
+  type LinkState,
+} from "@/components/gcs/packets";
 import { TrajectoryPanel } from "@/components/gcs/TrajectoryPanel";
 import {
   AlertsPanel,
@@ -57,7 +63,21 @@ function GroundStation() {
   const sourceRef = useRef<DataSource>("sim");
   const sim = useTelemetry(site, source === "sim");
   const live = useLiveTelemetry(site);
-  const rocket = source === "sim" ? sim.rocket : live.rocket;
+  const { rocket, reset: resetLive } = live;
+
+  // ---- LoRa link gate ----------------------------------------------------
+  // UI-side only: the rocket always transmits. Phase 1 gates Simulation; Live · USB
+  // has no gate yet, so everything it receives counts as ON.
+  const [simLink, setSimLink] = useState<LinkState>("STANDBY");
+  const simLinkRef = useRef<LinkState>("STANDBY");
+  const link: LinkState = source === "sim" ? simLink : "ON";
+  const changeLink = (next: LinkState) => {
+    // Pressing ON again while ON must not wipe the flight on screen.
+    if (next === simLinkRef.current) return;
+    simLinkRef.current = next;
+    setSimLink(next);
+    live.enterLink(next);
+  };
   const [entries, setEntries] = useState<ConsoleEntry[]>([]);
   const nextId = useRef(1);
 
@@ -77,15 +97,20 @@ function GroundStation() {
   useEffect(() => {
     if (sourceRef.current !== "sim" || sim.rocket.packetCount === 0) return;
     const f = sim.rocket;
-    ingest(simulateDownlink(f, teamId), { rssi: f.rssi, snr: f.snr }, teamId);
+    const line = simulateDownlink(f, teamId);
+    live.apply(ingest(line, { rssi: f.rssi, snr: f.snr }, teamId, simLinkRef.current));
   }, [sim.rocket.packetCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A new launch site restarts the simulated flight, so the display restarts with it.
+  useEffect(() => {
+    if (sourceRef.current === "sim") resetLive();
+  }, [resetLive]);
 
   // ---- Live downlink over USB --------------------------------------------
   // The ground-station Teensy prints one decoded packet per line; each line is
   // logged like a simulated one and, when valid, drives every panel. Lines that
   // start with '#' are its info lines: "#RSSI=..,SNR=.." belongs to the packet
   // just before it; the rest (#ACK, #CMD_TX, setup echo) are not packets.
-  const [baud, setBaud] = useState(115200);
   const [lastLine, setLastLine] = useState<string | null>(null);
   const serial = useSerialLines((raw) => {
     if (sourceRef.current !== "live") return;
@@ -114,6 +139,8 @@ function GroundStation() {
     if (source === "live") void serial.disconnect();
     resetPackets();
     live.reset();
+    simLinkRef.current = "STANDBY";
+    setSimLink("STANDBY");
     setLastLine(null);
     setEvents([]);
     setSource(next);
@@ -130,23 +157,29 @@ function GroundStation() {
 
   // ---- Mission event log -------------------------------------------------
   const [events, setEvents] = useState<MissionEvent[]>([]);
-  const prevRocketState = useRef(rocket.state);
+  // Null until the first packet after LORA_LINK_ON: that packet sets the baseline, so
+  // a display reset never looks like a state change.
+  const prevRocketState = useRef<typeof rocket.state | null>(null);
   useEffect(() => {
-    const add = (label: string) => setEvents((e) => [...e, { label, time: stamp() }].slice(-30));
-
-    if (prevRocketState.current !== rocket.state) {
-      if (rocket.state === "IMU_CALIBRATE") add("IMU CALIBRATION");
-      else if (rocket.state === "LIFTOFF") {
-        add("IGNITION");
-        add("LIFT-OFF");
-      } else if (rocket.state === "APOGEE") add("APOGEE");
-      else if (rocket.state === "PAYLOAD_SEPARATION") {
-        add("DROGUE DEPLOY");
-        add("PAYLOAD SEPARATION");
-      } else if (rocket.state === "IMPACT") add("TOUCHDOWN");
-      prevRocketState.current = rocket.state;
+    if (link !== "ON" || (source === "sim" && rocket.lastPacketAt === 0)) {
+      prevRocketState.current = null;
+      return;
     }
-  }, [rocket.state]);
+    const prev = prevRocketState.current;
+    prevRocketState.current = rocket.state;
+    if (prev === null || prev === rocket.state) return;
+
+    const add = (label: string) => setEvents((e) => [...e, { label, time: stamp() }].slice(-30));
+    if (rocket.state === "IMU_CALIBRATE") add("IMU CALIBRATION");
+    else if (rocket.state === "LIFTOFF") {
+      add("IGNITION");
+      add("LIFT-OFF");
+    } else if (rocket.state === "APOGEE") add("APOGEE");
+    else if (rocket.state === "PAYLOAD_SEPARATION") {
+      add("DROGUE DEPLOY");
+      add("PAYLOAD SEPARATION");
+    } else if (rocket.state === "IMPACT") add("TOUCHDOWN");
+  }, [rocket.state, rocket.lastPacketAt, link, source]);
 
   // ---- Command lifecycle -------------------------------------------------
   const pushCommand = (
@@ -168,6 +201,15 @@ function GroundStation() {
       return;
     }
     onStage?.("SENT");
+
+    // The link commands act on this station only, so they cannot fail.
+    if (cmd === "LORA_LINK_ON" || cmd === "LORA_LINK_OFF") {
+      setEntries((e) => e.map((x) => (x.id === id ? { ...x, ack: "ACK", exec: "PASS" } : x)));
+      changeLink(cmd === "LORA_LINK_ON" ? "ON" : "OFF");
+      setTimeout(() => onStage?.("ACK"), 150);
+      setTimeout(() => onStage?.("PASS"), 300);
+      return;
+    }
 
     const acked = Math.random() > 0.06;
     setTimeout(
@@ -212,6 +254,8 @@ function GroundStation() {
     }[] = [];
     if (parachuteFail)
       list.push({ type: "PARACHUTE COMMAND FAILED", level: "danger", source: "SYS" });
+    // Rocket alerts only judge packets shown with the link ON.
+    if (link !== "ON") return list;
     // Nothing to judge until the first packet arrives.
     if (rocket.lastPacketAt === 0) return list;
     const rocketStale = now - rocket.lastPacketAt > 3000;
@@ -243,6 +287,7 @@ function GroundStation() {
     rocket.gpsValid,
     rocket.lastPacketAt,
     parachuteFail,
+    link,
     now,
   ]);
 
@@ -301,10 +346,12 @@ function GroundStation() {
       ? "DEGRADED"
       : "NOMINAL";
 
-  const linkStatus = (quality: number, lastPacketAt: number) => {
-    if (lastPacketAt > 0 && now - lastPacketAt > 3000) return "LOST" as const;
-    if (quality < 70) return "DEGRADED" as const;
-    return "CONNECTED" as const;
+  const linkStatus = (quality: number, lastPacketAt: number): LinkStatus => {
+    if (link === "STANDBY") return "STANDBY";
+    if (link === "OFF") return "PAUSED";
+    if (lastPacketAt > 0 && now - lastPacketAt > 3000) return "LOST";
+    if (quality < 70) return "DEGRADED";
+    return "CONNECTED";
   };
 
   const alert = useMemo(() => {
@@ -312,6 +359,10 @@ function GroundStation() {
     if (danger) return { level: "danger" as const, message: `${danger.type} · ${danger.source}` };
     const warn = activeAlerts[0];
     if (warn) return { level: "warn" as const, message: `${warn.type} · ${warn.source}` };
+    if (link === "STANDBY")
+      return { level: "info" as const, message: "STANDBY · SEND LORA_LINK_ON" };
+    if (link === "OFF")
+      return { level: "info" as const, message: "LORA LINK OFF · DISPLAY PAUSED" };
     if (rocket.state === "IMPACT")
       return { level: "info" as const, message: "ROCKET LANDED · RECOVERY" };
     if (source === "sim")
@@ -321,7 +372,7 @@ function GroundStation() {
     if (rocket.lastPacketAt === 0)
       return { level: "info" as const, message: "LIVE MODE · WAITING FOR PACKETS" };
     return { level: "info" as const, message: "LIVE MODE · TELEMETRY NOMINAL" };
-  }, [activeAlerts, rocket.state, rocket.lastPacketAt, source, serial.status]);
+  }, [activeAlerts, rocket.state, rocket.lastPacketAt, source, serial.status, link]);
 
   // Apogee = highest recorded fix (firmware APOGEE state can lag the true peak).
   const apogeePoint = useMemo(
@@ -435,9 +486,7 @@ function GroundStation() {
               onSourceChange={changeSource}
               status={serial.status}
               error={serial.error}
-              baud={baud}
-              onBaudChange={setBaud}
-              onConnect={() => void serial.connect(baud)}
+              onConnect={() => void serial.connect()}
               onDisconnect={() => void serial.disconnect()}
               lastLine={lastLine}
             />

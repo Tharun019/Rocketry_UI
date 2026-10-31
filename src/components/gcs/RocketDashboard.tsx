@@ -16,6 +16,9 @@ export function RocketDashboard({ data, onCommand }: Props) {
   const xyz = (v: [number, number, number], d: number) =>
     v.map((n, i) => ({ k: "XYZ"[i], v: Number.isFinite(n) ? n.toFixed(d) : "—" }));
 
+  // Nothing shown yet (or link off): zeros are not readings, so no warning colours.
+  const noData = data.lastPacketAt === 0;
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-4">
       <div className="flex flex-col gap-4 min-w-0">
@@ -30,9 +33,9 @@ export function RocketDashboard({ data, onCommand }: Props) {
             <TelemetryCard label="Temperature" value={data.temperature.toFixed(1)} unit="°C" />
             <TelemetryCard
               label="GPS"
-              value={`${data.lat.toFixed(5)}° N`}
-              sub={`${data.lon.toFixed(5)}° E`}
-              tone={data.gpsValid ? undefined : "warn"}
+              value={`${(noData ? 0 : data.lat).toFixed(5)}° N`}
+              sub={`${(noData ? 0 : data.lon).toFixed(5)}° E`}
+              tone={noData || data.gpsValid ? undefined : "warn"}
             />
             <TelemetryCard label="Acceleration" unit="m/s²" parts={xyz(data.accel, 1)} />
             <TelemetryCard label="Angular rate" unit="°/s" parts={xyz(data.gyro, 0)} />
@@ -40,7 +43,7 @@ export function RocketDashboard({ data, onCommand }: Props) {
               label="Battery"
               value={data.battery.toFixed(2)}
               unit="V"
-              tone={data.battery < 7.0 ? "warn" : "ok"}
+              tone={noData ? undefined : data.battery < 7.0 ? "warn" : "ok"}
             />
             <TelemetryCard
               label="RSSI"
@@ -51,7 +54,15 @@ export function RocketDashboard({ data, onCommand }: Props) {
             <TelemetryCard
               label="Link quality"
               value={`${data.linkQuality.toFixed(0)}%`}
-              tone={data.linkQuality >= 80 ? "ok" : data.linkQuality >= 70 ? "warn" : "danger"}
+              tone={
+                data.linkQuality === 0
+                  ? undefined
+                  : data.linkQuality >= 80
+                    ? "ok"
+                    : data.linkQuality >= 70
+                      ? "warn"
+                      : "danger"
+              }
             />
           </div>
         </Panel>

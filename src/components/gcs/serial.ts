@@ -20,7 +20,8 @@ function webSerial(): SerialLike | undefined {
 
 export type SerialStatus = "unsupported" | "idle" | "connecting" | "open" | "error";
 
-export const BAUD_RATES = [9600, 57600, 115200, 230400, 460800, 921600];
+/** Teensy USB serial ignores the rate, but the port still needs one to open. */
+const BAUD_RATE = 115200;
 
 /**
  * Reads text lines from a USB serial port (the ground-station Teensy).
@@ -69,62 +70,59 @@ export function useSerialLines(onLine: (line: string) => void) {
     setError(null);
   }, [release]);
 
-  const connect = useCallback(
-    async (baudRate: number) => {
-      const serial = webSerial();
-      if (!serial) return setStatus("unsupported");
-      if (port.current) await release();
-      setError(null);
-      setStatus("connecting");
+  const connect = useCallback(async () => {
+    const serial = webSerial();
+    if (!serial) return setStatus("unsupported");
+    if (port.current) await release();
+    setError(null);
+    setStatus("connecting");
 
-      let p: SerialPortLike;
-      try {
-        p = await serial.requestPort();
-        await p.open({ baudRate });
-      } catch (e) {
-        // Closing the port picker without choosing is not an error.
-        if (e instanceof DOMException && e.name === "NotFoundError") return setStatus("idle");
-        setError(e instanceof Error ? e.message : String(e));
-        return setStatus("error");
-      }
-      if (!p.readable) {
-        setError("Port is not readable");
-        return setStatus("error");
-      }
+    let p: SerialPortLike;
+    try {
+      p = await serial.requestPort();
+      await p.open({ baudRate: BAUD_RATE });
+    } catch (e) {
+      // Closing the port picker without choosing is not an error.
+      if (e instanceof DOMException && e.name === "NotFoundError") return setStatus("idle");
+      setError(e instanceof Error ? e.message : String(e));
+      return setStatus("error");
+    }
+    if (!p.readable) {
+      setError("Port is not readable");
+      return setStatus("error");
+    }
 
-      port.current = p;
-      closing.current = false;
-      const r = p.readable.getReader();
-      reader.current = r;
-      setStatus("open");
+    port.current = p;
+    closing.current = false;
+    const r = p.readable.getReader();
+    reader.current = r;
+    setStatus("open");
 
-      const decoder = new TextDecoder();
-      let buffer = "";
-      try {
-        for (;;) {
-          const { value, done } = await r.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split(/\r\n|\r|\n/);
-          buffer = lines.pop() ?? "";
-          for (const line of lines) if (line.trim()) onLineRef.current(line);
-          // Guard against a sender that never ends a line.
-          if (buffer.length > 4096) buffer = "";
-        }
-      } catch (e) {
-        if (!closing.current) {
-          setError(e instanceof Error ? e.message : String(e));
-          setStatus("error");
-        }
-      } finally {
-        if (reader.current === r) await release();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { value, done } = await r.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r\n|\r|\n/);
+        buffer = lines.pop() ?? "";
+        for (const line of lines) if (line.trim()) onLineRef.current(line);
+        // Guard against a sender that never ends a line.
+        if (buffer.length > 4096) buffer = "";
       }
+    } catch (e) {
       if (!closing.current) {
-        setStatus((s) => (s === "error" ? s : "idle"));
+        setError(e instanceof Error ? e.message : String(e));
+        setStatus("error");
       }
-    },
-    [release],
-  );
+    } finally {
+      if (reader.current === r) await release();
+    }
+    if (!closing.current) {
+      setStatus((s) => (s === "error" ? s : "idle"));
+    }
+  }, [release]);
 
   // Unplugging the Teensy ends the read loop with an error; report it plainly.
   useEffect(() => {

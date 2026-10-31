@@ -182,6 +182,24 @@ export function liveInitialFrame(site: LaunchSite): RocketFrame {
 }
 
 /**
+ * LoRa link switched off: cards and charts go to zero, while the trajectory, the flight
+ * state and the last signal figures stay frozen. `lastPacketAt` 0 means "no data shown".
+ */
+export function linkOffFrame(r: RocketFrame, site: LaunchSite): RocketFrame {
+  return {
+    ...liveInitialFrame(site),
+    state: r.state,
+    rssi: r.rssi,
+    snr: r.snr,
+    linkQuality: r.linkQuality,
+    path: r.path,
+    track: r.track,
+    markers: r.markers,
+    stateFixes: r.stateFixes,
+  };
+}
+
+/**
  * Simulated telemetry. Restarts whenever the launch site changes, or when it is
  * re-enabled; paused while live data is shown.
  */

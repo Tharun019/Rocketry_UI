@@ -118,9 +118,16 @@ export function simulateDownlink(f: RocketFrame, teamId: string): string {
 export type IssueKind = "MALFORMED" | "GAP" | "DUPLICATE" | "RESET" | "TEAM_ID";
 export type PacketIssue = { kind: IssueKind; detail: string };
 
+/**
+ * What the LoRa link gate was doing when a packet arrived. The rocket always transmits;
+ * LORA_LINK_ON / LORA_LINK_OFF only decide how received packets are shown and recorded.
+ */
+export type LinkState = "STANDBY" | "ON" | "OFF";
+
 export type PacketRecord = {
-  /** Ground-side receive index, 1-based. */
+  /** Ground-side receive index, 1-based (position in the log). */
   seq: number;
+  link: LinkState;
   rxAt: number;
   raw: string;
   /** Field values exactly as received; null when the line could not be parsed. */
@@ -134,6 +141,7 @@ export type PacketRecord = {
 
 export type GroundLink = { rssi: number | null; snr: number | null };
 
+/** Counts cover packets shown in the Packets tab; STANDBY packets are only in `rows`. */
 export type PacketStats = {
   received: number;
   valid: number;
@@ -144,6 +152,8 @@ export type PacketStats = {
   resets: number;
   teamMismatch: number;
   lastRxAt: number;
+  /** Valid packets per link state, i.e. the data rows of each CSV. */
+  rows: Record<LinkState, number>;
 };
 
 const EMPTY_STATS: PacketStats = {
@@ -155,6 +165,7 @@ const EMPTY_STATS: PacketStats = {
   resets: 0,
   teamMismatch: 0,
   lastRxAt: 0,
+  rows: { STANDBY: 0, ON: 0, OFF: 0 },
 };
 
 /** Ground-station info line "#RSSI=-71,SNR=8.5" -> figures; null for any other line. */
@@ -227,11 +238,17 @@ export function usePacketLog() {
    * simulator); live figures arrive on the next "#RSSI" line, see `attachLink`.
    */
   const ingest = useCallback(
-    (raw: string, link: GroundLink | null, expectedTeamId: string): PacketRecord => {
+    (
+      raw: string,
+      link: GroundLink | null,
+      expectedTeamId: string,
+      linkState: LinkState = "ON",
+    ): PacketRecord => {
       const rxAt = Date.now();
       const split = { rssi: link?.rssi ?? null, snr: link?.snr ?? null };
       const parsed = parsePacket(raw);
-      const s = { ...statsRef.current, received: statsRef.current.received + 1, lastRxAt: rxAt };
+      const prevStats = statsRef.current;
+      const s = { ...prevStats, received: prevStats.received + 1, lastRxAt: rxAt };
       const issues: PacketIssue[] = [];
       let values: string[] | null = null;
       let count: number | null = null;
@@ -272,7 +289,8 @@ export function usePacketLog() {
       }
 
       const record: PacketRecord = {
-        seq: s.received,
+        seq: log.current.length + 1,
+        link: linkState,
         rxAt,
         raw,
         values,
@@ -282,8 +300,12 @@ export function usePacketLog() {
         snr: split.snr,
       };
       log.current.push(record);
-      statsRef.current = s;
-      setStats(s);
+      const rows = values
+        ? { ...prevStats.rows, [linkState]: prevStats.rows[linkState] + 1 }
+        : prevStats.rows;
+      const nextStats = linkState === "STANDBY" ? { ...prevStats, rows } : { ...s, rows };
+      statsRef.current = nextStats;
+      setStats(nextStats);
       return record;
     },
     [],
@@ -364,6 +386,11 @@ export function flightFileName(teamId: string, suffix = "") {
   return `Flight_${teamId.replace(/[^A-Za-z0-9._-]/g, "_") || "TEAM"}${suffix}.csv`;
 }
 
+/** The records of one link state; each CSV is built from one of these. */
+export function linkRecords(log: PacketRecord[], link: LinkState) {
+  return log.filter((r) => r.link === link);
+}
+
 /** The judges' file: one row per valid packet, header row first. */
 export function buildFlightCsv(log: PacketRecord[]) {
   const header = [...PACKET_FIELDS, ...GROUND_FIELDS].map((f) => f.key);
@@ -403,6 +430,19 @@ export function buildStateSummaryCsv(log: PacketRecord[], n = 5) {
     last.forEach((r, i) => rows.push(row(r, `LAST_${last.length - i}`)));
   }
   return csvLines([header, ...rows]);
+}
+
+/** Data rows buildStateSummaryCsv writes for this log: up to 5 + 5 per state. */
+export function stateSummaryRowCount(log: PacketRecord[]) {
+  const perState = new Map<string, number>();
+  for (const r of log) {
+    if (!r.values) continue;
+    const s = r.values[FIELD_INDEX.FLIGHT_SOFTWARE_STATE];
+    perState.set(s, (perState.get(s) ?? 0) + 1);
+  }
+  let rows = 0;
+  for (const n of perState.values()) rows += Math.min(n, 10);
+  return rows;
 }
 
 export function downloadText(name: string, text: string) {

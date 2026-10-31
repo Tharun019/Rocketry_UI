@@ -1,5 +1,5 @@
 import { Plug, Unplug } from "lucide-react";
-import { BAUD_RATES, type SerialStatus } from "./serial";
+import type { SerialStatus } from "./serial";
 import { PACKET_FIELDS } from "./packets";
 import { Button, Panel, Segmented, StatusPill, TONE_COLOR, type Tone } from "./ui";
 
@@ -10,8 +10,6 @@ type Props = {
   onSourceChange: (s: DataSource) => void;
   status: SerialStatus;
   error: string | null;
-  baud: number;
-  onBaudChange: (b: number) => void;
   onConnect: () => void;
   onDisconnect: () => void;
   /** Most recent line from the receiver, shown as-is for wiring checks. */
@@ -31,8 +29,6 @@ export function GroundStationPanel({
   onSourceChange,
   status,
   error,
-  baud,
-  onBaudChange,
   onConnect,
   onDisconnect,
   lastLine,
@@ -77,32 +73,15 @@ export function GroundStationPanel({
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-end">
-            <label className="flex flex-col gap-1.5">
-              <span className="eyebrow">Baud rate</span>
-              <select
-                value={baud}
-                disabled={open}
-                onChange={(e) => onBaudChange(Number(e.target.value))}
-                className="h-9 rounded-md border border-border bg-well px-2.5 readout text-[13px] disabled:opacity-50 focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-ring/40"
-              >
-                {BAUD_RATES.map((b) => (
-                  <option key={b} value={b}>
-                    {b.toLocaleString()}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {open ? (
-              <Button size="md" onClick={onDisconnect}>
-                <Unplug className="h-3.5 w-3.5" /> Disconnect
-              </Button>
-            ) : (
-              <Button size="md" variant="primary" onClick={onConnect}>
-                <Plug className="h-3.5 w-3.5" /> Connect USB
-              </Button>
-            )}
-          </div>
+          {open ? (
+            <Button size="md" className="w-full" onClick={onDisconnect}>
+              <Unplug className="h-3.5 w-3.5" /> Disconnect
+            </Button>
+          ) : (
+            <Button size="md" variant="primary" className="w-full" onClick={onConnect}>
+              <Plug className="h-3.5 w-3.5" /> Connect USB
+            </Button>
+          )}
 
           {error ? (
             <p className="text-xs" style={{ color: TONE_COLOR.danger }}>
