@@ -320,6 +320,11 @@ export function usePacketLog() {
     return last;
   }, []);
 
+  /** The on-board counter restarts on purpose: do not report it as a reset. */
+  const restartCounter = useCallback(() => {
+    lastCount.current = null;
+  }, []);
+
   /** Start a fresh session (e.g. when switching between simulated and live data). */
   const reset = useCallback(() => {
     log.current.length = 0;
@@ -328,7 +333,7 @@ export function usePacketLog() {
     setStats(EMPTY_STATS);
   }, []);
 
-  return { log: log.current, stats, ingest, attachLink, reset };
+  return { log: log.current, stats, ingest, attachLink, restartCounter, reset };
 }
 
 // ---- Team ID ---------------------------------------------------------------

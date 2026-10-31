@@ -25,9 +25,10 @@ const BAUD_RATE = 115200;
 
 /**
  * Reads text lines from a USB serial port (the ground-station Teensy).
- * `onLine` is called once per non-empty line, without its line ending.
+ * `onLine` is called once per non-empty line, without its line ending; `onOpen` when
+ * a port has opened, before its first line.
  */
-export function useSerialLines(onLine: (line: string) => void) {
+export function useSerialLines(onLine: (line: string) => void, onOpen?: () => void) {
   const [status, setStatus] = useState<SerialStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const port = useRef<SerialPortLike | null>(null);
@@ -35,6 +36,8 @@ export function useSerialLines(onLine: (line: string) => void) {
   const closing = useRef(false);
   const onLineRef = useRef(onLine);
   onLineRef.current = onLine;
+  const onOpenRef = useRef(onOpen);
+  onOpenRef.current = onOpen;
 
   // Checked after mount so server render and first client render match.
   useEffect(() => {
@@ -96,6 +99,7 @@ export function useSerialLines(onLine: (line: string) => void) {
     closing.current = false;
     const r = p.readable.getReader();
     reader.current = r;
+    onOpenRef.current?.();
     setStatus("open");
 
     const decoder = new TextDecoder();

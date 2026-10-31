@@ -66,18 +66,9 @@ function GroundStation() {
   const { rocket, reset: resetLive } = live;
 
   // ---- LoRa link gate ----------------------------------------------------
-  // UI-side only: the rocket always transmits. Phase 1 gates Simulation; Live · USB
-  // has no gate yet, so everything it receives counts as ON.
-  const [simLink, setSimLink] = useState<LinkState>("STANDBY");
-  const simLinkRef = useRef<LinkState>("STANDBY");
-  const link: LinkState = source === "sim" ? simLink : "ON";
-  const changeLink = (next: LinkState) => {
-    // Pressing ON again while ON must not wipe the flight on screen.
-    if (next === simLinkRef.current) return;
-    simLinkRef.current = next;
-    setSimLink(next);
-    live.enterLink(next);
-  };
+  // UI-side only: the rocket always transmits. The same gate covers both data sources.
+  const [link, setLink] = useState<LinkState>("STANDBY");
+  const linkRef = useRef<LinkState>("STANDBY");
   const [entries, setEntries] = useState<ConsoleEntry[]>([]);
   const nextId = useRef(1);
 
@@ -92,13 +83,27 @@ function GroundStation() {
     stats: packetStats,
     ingest,
     attachLink,
+    restartCounter,
     reset: resetPackets,
   } = usePacketLog();
+  const changeLink = (next: LinkState) => {
+    const prev = linkRef.current;
+    // Pressing ON again while ON must not wipe the flight on screen.
+    if (next === prev) return;
+    linkRef.current = next;
+    setLink(next);
+    live.enterLink(next);
+    // The first ON flies the simulated rocket from the pad; OFF -> ON resumes it.
+    if (sourceRef.current === "sim" && prev === "STANDBY" && next === "ON") {
+      sim.restart();
+      restartCounter();
+    }
+  };
   useEffect(() => {
     if (sourceRef.current !== "sim" || sim.rocket.packetCount === 0) return;
     const f = sim.rocket;
     const line = simulateDownlink(f, teamId);
-    live.apply(ingest(line, { rssi: f.rssi, snr: f.snr }, teamId, simLinkRef.current));
+    live.apply(ingest(line, { rssi: f.rssi, snr: f.snr }, teamId, linkRef.current));
   }, [sim.rocket.packetCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A new launch site restarts the simulated flight, so the display restarts with it.
@@ -112,26 +117,33 @@ function GroundStation() {
   // start with '#' are its info lines: "#RSSI=..,SNR=.." belongs to the packet
   // just before it; the rest (#ACK, #CMD_TX, setup echo) are not packets.
   const [lastLine, setLastLine] = useState<string | null>(null);
-  const serial = useSerialLines((raw) => {
-    if (sourceRef.current !== "live") return;
-    setLastLine(raw);
-    // Packets never contain '#'. Anything from the first '#' on is a receiver
-    // info line; this also splits "packet#RSSI=..,SNR=.." printed on one line.
-    const hash = raw.indexOf("#");
-    const packet = (hash < 0 ? raw : raw.slice(0, hash)).trim();
-    const info = hash < 0 ? "" : raw.slice(hash).trim();
-    if (packet) live.apply(ingest(packet, null, teamId));
-    const link = info ? parseLinkLine(info) : null;
-    if (link && attachLink(link)) live.applyLink(link);
-  });
+  const serial = useSerialLines(
+    (raw) => {
+      if (sourceRef.current !== "live") return;
+      setLastLine(raw);
+      // Packets never contain '#'. Anything from the first '#' on is a receiver
+      // info line; this also splits "packet#RSSI=..,SNR=.." printed on one line.
+      const hash = raw.indexOf("#");
+      const packet = (hash < 0 ? raw : raw.slice(0, hash)).trim();
+      const info = hash < 0 ? "" : raw.slice(hash).trim();
+      if (packet) live.apply(ingest(packet, null, teamId, linkRef.current));
+      const figures = info ? parseLinkLine(info) : null;
+      if (!figures) return;
+      // Every record keeps its RSSI/SNR for the CSVs; the display only takes ON figures.
+      const rec = attachLink(figures);
+      if (rec?.link === "ON" && linkRef.current === "ON") live.applyLink(figures);
+    },
+    // A new connection never carries a link state over; the log is kept.
+    () => changeLink("STANDBY"),
+  );
 
   const changeSource = (next: DataSource) => {
     if (next === source) return;
     if (
       source === "live" &&
-      packetStats.received > 0 &&
+      packetLog.length > 0 &&
       !window.confirm(
-        `Switch to simulation? This clears the ${packetStats.received.toLocaleString()} live packets received so far. Export the CSV first if you need them.`,
+        `Switch to simulation? This clears the ${packetLog.length.toLocaleString()} live packets received so far. Export the CSV first if you need them.`,
       )
     )
       return;
@@ -139,8 +151,8 @@ function GroundStation() {
     if (source === "live") void serial.disconnect();
     resetPackets();
     live.reset();
-    simLinkRef.current = "STANDBY";
-    setSimLink("STANDBY");
+    linkRef.current = "STANDBY";
+    setLink("STANDBY");
     setLastLine(null);
     setEvents([]);
     setSource(next);
@@ -161,7 +173,7 @@ function GroundStation() {
   // a display reset never looks like a state change.
   const prevRocketState = useRef<typeof rocket.state | null>(null);
   useEffect(() => {
-    if (link !== "ON" || (source === "sim" && rocket.lastPacketAt === 0)) {
+    if (link !== "ON" || rocket.lastPacketAt === 0) {
       prevRocketState.current = null;
       return;
     }
@@ -179,7 +191,7 @@ function GroundStation() {
       add("DROGUE DEPLOY");
       add("PAYLOAD SEPARATION");
     } else if (rocket.state === "IMPACT") add("TOUCHDOWN");
-  }, [rocket.state, rocket.lastPacketAt, link, source]);
+  }, [rocket.state, rocket.lastPacketAt, link]);
 
   // ---- Command lifecycle -------------------------------------------------
   const pushCommand = (
@@ -194,6 +206,15 @@ function GroundStation() {
         { id, t: stamp(), channel, cmd, ack: "PENDING" as const, exec: "PENDING" as const },
       ].slice(-80),
     );
+    // The link commands act on this station only, so they cannot fail.
+    if (cmd === "LORA_LINK_ON" || cmd === "LORA_LINK_OFF") {
+      onStage?.("SENT");
+      setEntries((e) => e.map((x) => (x.id === id ? { ...x, ack: "ACK", exec: "PASS" } : x)));
+      changeLink(cmd === "LORA_LINK_ON" ? "ON" : "OFF");
+      setTimeout(() => onStage?.("ACK"), 150);
+      setTimeout(() => onStage?.("PASS"), 300);
+      return;
+    }
     // Live mode has no uplink yet: log the command but do not pretend it was sent.
     if (source === "live") {
       setEntries((e) => e.map((x) => (x.id === id ? { ...x, ack: "UNSENT" } : x)));
@@ -201,15 +222,6 @@ function GroundStation() {
       return;
     }
     onStage?.("SENT");
-
-    // The link commands act on this station only, so they cannot fail.
-    if (cmd === "LORA_LINK_ON" || cmd === "LORA_LINK_OFF") {
-      setEntries((e) => e.map((x) => (x.id === id ? { ...x, ack: "ACK", exec: "PASS" } : x)));
-      changeLink(cmd === "LORA_LINK_ON" ? "ON" : "OFF");
-      setTimeout(() => onStage?.("ACK"), 150);
-      setTimeout(() => onStage?.("PASS"), 300);
-      return;
-    }
 
     const acked = Math.random() > 0.06;
     setTimeout(
@@ -359,6 +371,8 @@ function GroundStation() {
     if (danger) return { level: "danger" as const, message: `${danger.type} · ${danger.source}` };
     const warn = activeAlerts[0];
     if (warn) return { level: "warn" as const, message: `${warn.type} · ${warn.source}` };
+    if (link === "STANDBY" && source === "live" && serial.status !== "open")
+      return { level: "info" as const, message: "LIVE MODE · GROUND STATION NOT CONNECTED" };
     if (link === "STANDBY")
       return { level: "info" as const, message: "STANDBY · SEND LORA_LINK_ON" };
     if (link === "OFF")

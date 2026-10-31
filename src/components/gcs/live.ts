@@ -141,8 +141,10 @@ function frameFromPacket(
 
   const point: TrackPoint = { t, lat, lon, alt: altitude };
   const flying = !PAD_STATES.has(state) && !(state === "IMPACT" && r.state === "IMPACT");
-  // The track starts on the ground at the last position seen on the pad.
-  const prior = r.track.length ? r.track : [{ t, lat: r.lat, lon: r.lon, alt: 0 }];
+  // The track starts on the ground at the last position seen on the pad. If the display
+  // restarted mid-flight there was no pad packet, so it starts at this packet instead.
+  const sawPad = r.lastPacketAt > 0 && PAD_STATES.has(r.state);
+  const prior = r.track.length ? r.track : sawPad ? [{ t, lat: r.lat, lon: r.lon, alt: 0 }] : [];
   const track =
     flying && gpsValid
       ? prior.length >= TRACK_MAX

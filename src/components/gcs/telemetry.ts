@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { offsetToLatLon, type LaunchSite } from "./site";
 
 export type FlightState =
@@ -343,5 +343,11 @@ export function useTelemetry(site: LaunchSite, enabled = true) {
     return () => clearInterval(id);
   }, [site.lat, site.lon, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { rocket };
+  /** Back to the pad, as if the rocket had just been powered on. */
+  const restart = useCallback(() => {
+    t0.current = Date.now();
+    setRocket(initialFrame(site));
+  }, [site]);
+
+  return { rocket, restart };
 }
